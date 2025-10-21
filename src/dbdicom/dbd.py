@@ -70,8 +70,6 @@ class DataBaseDicom():
         # self._split_series()
         return self
 
-    
-
     def delete(self, entity, not_exists_ok=False):
         """Delete a DICOM entity from the database
 
@@ -729,7 +727,7 @@ class DataBaseDicom():
                 else:
                     to_entity[-1] = (to_entity[-1] + '_copy', 0)
                 while to_entity in self.series():
-                    to_entity[-1][1] += 1
+                    to_entity[-1] = (to_entity[-1][0], to_entity[-1][1] + 1)
             if len(to_entity) != 4:
                 raise ValueError(
                     f"Cannot copy series {from_entity} to series {to_entity}. "

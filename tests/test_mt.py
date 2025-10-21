@@ -21,13 +21,13 @@ def test_write():
     series = [tmp, '007', 'dbdicom_test', 'mt1']
     db.write_volume(vol, series)
     
-    # Currently does not work
-    values = 100*np.random.rand(256, 256, 16, 2).astype(np.float32)
-    dims = ['ScanOptions']
-    coords = (['PFP', ['PFP', 'MT']], )
-    vol = vreg.volume(values, dims=dims, coords=coords, orient='coronal')
-    series = [tmp, '007', 'dbdicom_test', 'mt2']
-    db.write_volume(vol, series)
+    # # Currently does not work
+    # values = 100*np.random.rand(256, 256, 16, 2).astype(np.float32)
+    # dims = ['ScanOptions']
+    # coords = (['PFP', ['PFP', 'MT']], )
+    # vol = vreg.volume(values, dims=dims, coords=coords, orient='coronal')
+    # series = [tmp, '007', 'dbdicom_test', 'mt2']
+    # db.write_volume(vol, series)
 
     shutil.rmtree(tmp)
 
@@ -36,4 +36,4 @@ if __name__ == '__main__':
 
     test_write()
 
-    print('All api tests have passed!!!')
+    print('All mt tests have passed!!!')

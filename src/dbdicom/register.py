@@ -79,6 +79,7 @@ def index(dbtree, entity):
                     for sr in sorted(st['series'], key=lambda sr: sr['SeriesNumber']):
                         idx += list(sr['instances'].values())
                 return idx
+        raise ValueError(f'Patient {patient_id} not found')
     elif len(entity)==3:
         study_uid = uid(dbtree, entity)
         idx = []
@@ -88,6 +89,7 @@ def index(dbtree, entity):
                     for sr in sorted(st['series'], key=lambda sr: sr['SeriesNumber']):
                         idx += list(sr['instances'].values())
                     return idx
+        raise ValueError(f'Study {study_uid} not found')
     elif len(entity)==4:
         series_uid = uid(dbtree, entity)
         for pt in sorted(dbtree, key=lambda pt: pt['PatientID']):
@@ -95,6 +97,7 @@ def index(dbtree, entity):
                 for sr in sorted(st['series'], key=lambda sr: sr['SeriesNumber']):
                     if sr['SeriesInstanceUID'] == series_uid:
                         return list(sr['instances'].values())
+        raise ValueError(f'Series {series_uid} not found')
                     
 def remove(dbtree, entity):
     if len(entity)==2:
