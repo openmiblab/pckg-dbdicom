@@ -85,8 +85,8 @@ def write(ds, file, status=None):
     dir = os.path.dirname(file)
     if not os.path.exists(dir):
         os.makedirs(dir)
-    ds.save_as(file, write_like_original=False) # deprecated
-    # ds.save_as(file, enforce_file_format=True)
+    # ds.save_as(file, write_like_original=False) # deprecated
+    pydicom.dcmwrite(file, ds, enforce_file_format=True)
 
 
 def codify(source_file, save_file, **kwargs):
