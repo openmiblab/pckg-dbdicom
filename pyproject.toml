@@ -7,14 +7,15 @@ requires = ['setuptools>=61.2']
 
 [project]
 name = "dbdicom"
-version = "0.3.13"
+version = "0.3.14"
 dependencies = [ 
     "tqdm",
     "importlib-resources",
     "numpy",
     "pandas", # make obsolete
     'vreg', 
-    "pydicom[basic,pixeldata]", 
+    "pydicom>=3.0",
+    #"pydicom[basic,pixeldata]>=3.0", 
     #"python-gdcm",
     #"pylibjpeg-libjpeg",
 ]
