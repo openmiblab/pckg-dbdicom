@@ -1,4 +1,5 @@
 import os
+import csv
 
 
 class AmbiguousError(Exception):
@@ -370,5 +371,31 @@ def summary(dbtree):
                 summary[pat_id, pat_name][study_desc, study_idx[study_desc]].append((series_desc, series_idx[series_desc]))
     
     return summary
+
+
+def to_csv(dbtree, csv_file):
+    
+    columns = ['PatientID', 'PatientName', 'StudyDescription', 'study index', 'SeriesDescription', 'SeriesNumber', 'nr of files']
+
+    with open(csv_file, 'w', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow(columns)  
+
+        for patient in sorted(dbtree, key=lambda pt: pt['PatientID']):
+            pat_id, pat_name = patient['PatientID'], patient['PatientName']
+
+            study_idx = {}
+            for study in sorted(patient['studies'], key=lambda st: st['StudyInstanceUID']):
+                study_desc = study['StudyDescription']
+                if study_desc in study_idx:
+                    study_idx[study_desc] += 1
+                else:
+                    study_idx[study_desc] = 0
+
+                for series in sorted(study['series'], key=lambda sr: sr['SeriesNumber']):
+                    n_instances = len(series['instances'])
+                    row = [pat_id, pat_name, study_desc, study_idx[study_desc], series['SeriesDescription'], series['SeriesNumber'], n_instances]
+                    writer.writerow(row) 
+
 
 

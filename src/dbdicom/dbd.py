@@ -122,6 +122,15 @@ class DataBaseDicom():
         """
         return register.summary(self.register)
     
+    def to_csv(self, csv_file) -> dict:
+        """Write a summary of the contents of the database to csv.
+
+        Args:
+            path (str): path to the DICOM folder
+            csv_file (str): path to the csv file
+        """
+        register.to_csv(self.register, csv_file)
+    
 
     def print(self):
         """Print the contents of the DICOM folder
@@ -477,7 +486,7 @@ class DataBaseDicom():
 
     def write_volume(
             self, vol:Union[vreg.Volume3D, tuple], series:list, 
-            ref:list=None, append=False, verbose=1,
+            ref:list=None, append=False, verbose=1, **kwargs,
         ):
         """Write a vreg.Volume3D to a DICOM series
 
@@ -490,6 +499,7 @@ class DataBaseDicom():
                To overrule this behaviour and add the volume to an existing series, set append to True. 
                Default is False.
             verbose (bool): if set to 1, a progress bar is shown
+            kwargs: Keyword-value pairs to be set on the fly
         """
         series_full_name = full_name(series)
         if series_full_name in self.series():
@@ -518,6 +528,8 @@ class DataBaseDicom():
             slices = vol.split()
             for i, sl in tqdm(enumerate(slices), desc='Writing volume..', disable=verbose==0):
                 dbdataset.set_volume(ds, sl)
+                if kwargs != {}:
+                    set_values(ds, list(kwargs.keys()), list(kwargs.values()))
                 self._write_dataset(ds, attr, n + 1 + i)
         else:
             i=0
@@ -528,6 +540,8 @@ class DataBaseDicom():
                     dbdataset.set_volume(ds, sl)
                     sl_coords = [c.ravel()[0] for c in sl.coords]
                     set_value(ds, sl.dims, sl_coords)
+                    if kwargs != {}:
+                        set_values(list(kwargs.keys()), list(kwargs.values()))
                     self._write_dataset(ds, attr, n + 1 + i)
                     i+=1
         return self
