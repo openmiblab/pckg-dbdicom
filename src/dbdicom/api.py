@@ -73,6 +73,18 @@ def tree(path) -> dict:
     return s
 
 
+def to_csv(path, csv_file) -> dict:
+    """Write a summary of the contents of the database to csv.
+
+    Args:
+        path (str): path to the DICOM folder
+        csv_file (str): path to the csv file
+    """
+    dbd = open(path)
+    dbd.to_csv(csv_file)
+    dbd.close()
+
+
 def patients(path, name:str=None, contains:str=None, isin:list=None)->list:
     """Return a list of patients in the DICOM folder.
 
@@ -278,7 +290,7 @@ def values(series:list, *attr, dims:list=None, verbose=1) -> Union[np.ndarray, l
 
 
 def write_volume(vol:Union[vreg.Volume3D, tuple], series:list, 
-                 ref:list=None, append=False, verbose=1):
+                 ref:list=None, append=False, verbose=1, **kwargs):
     """Write a vreg.Volume3D to a DICOM series
 
     Args:
@@ -290,9 +302,10 @@ def write_volume(vol:Union[vreg.Volume3D, tuple], series:list,
             To overrule this behaviour and add the volume to an existing series, set append to True. 
             Default is False.
         verbose (bool): if set to 1, a progress bar is shown. verbose=0 does not show updates.
+        kwargs: Keyword-value pairs to be set on the fly
     """
     dbd = open(series[0])
-    dbd.write_volume(vol, series, ref, append, verbose)
+    dbd.write_volume(vol, series, ref=ref, append=append, verbose=verbose, **kwargs)
     dbd.close()
 
 
