@@ -308,8 +308,12 @@ class DataBaseDicom():
             vol.set_dims(dims[1:])
         return vol
 
+    # Obsolete API - phase out
+    def volumes_2d(self, *args, **kwargs):
+        return self.slices(*args, **kwargs)
+    
 
-    def volumes_2d(self, entity:Union[list, str], dims:list=None, verbose=1) -> list:
+    def slices(self, entity:Union[list, str], dims:list=None, verbose=1) -> list:
         """Read 2D volumes from the series
 
         Args:
@@ -400,7 +404,10 @@ class DataBaseDicom():
                 vol.set_dims(dims[1:])
 
             volumes_2d.append(vol)
-            
+        
+        # sort volumes by slice location
+        volumes_2d.sort(key=lambda v: dbdataset.affine_to_slice_loc(v.affine))
+
         return volumes_2d
 
 
@@ -720,6 +727,7 @@ class DataBaseDicom():
             return values[0]
         else:
             return {p: values[i] for i, p in enumerate(pars)} 
+        
     
     def copy(self, from_entity, to_entity=None):
         """Copy a DICOM  entity (patient, study or series)

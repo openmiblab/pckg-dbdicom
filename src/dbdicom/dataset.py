@@ -264,6 +264,10 @@ def set_affine(ds, affine):
     set_values(ds, 'SliceLocation', np.dot(v['ImagePositionPatient'], v['slice_cosine']))
 
 
+def affine_to_slice_loc(affine):
+    v = image.dismantle_affine_matrix(affine)
+    return np.dot(v['ImagePositionPatient'], v['slice_cosine'])
+
 
 def pixel_data(ds):
 
