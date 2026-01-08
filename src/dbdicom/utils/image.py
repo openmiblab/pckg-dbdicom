@@ -25,23 +25,6 @@ def affine_matrix(      # single slice function
     return affine 
 
 
-# def slice_location( 
-#         image_orientation:list,  # ImageOrientationPatient
-#         image_position:list,    # ImagePositionPatient
-#     ) -> float:
-#     """Calculate Slice Location"""
-
-#     row_cosine = np.array(image_orientation[:3])    
-#     column_cosine = np.array(image_orientation[3:]) 
-#     slice_cosine = np.cross(row_cosine, column_cosine)
-
-#     # # The coronal orientation has a left-handed reference frame
-#     # if np.array_equal(np.around(image_orientation, 3), [1,0,0,0,0,-1]):
-#     #     slice_cosine = -slice_cosine
-
-#     return np.dot(np.array(image_position), slice_cosine)
-
-
 def dismantle_affine_matrix(affine):
     # Note: nr of slices can not be retrieved from affine_matrix
     # Note: slice_cosine is not a DICOM keyword but can be used 
@@ -53,6 +36,9 @@ def dismantle_affine_matrix(affine):
     row_cosine = affine[:3, 0] / column_spacing
     column_cosine = affine[:3, 1] / row_spacing
     slice_cosine = affine[:3, 2] / slice_spacing
+    # Change to the most common definition - affine[:3, 2] is not even guaranteed to be perp.
+    # It is also consistent with def affine_matrix
+    # slice_cosine = np.cross(row_cosine, column_cosine) 
     return {
         'PixelSpacing': [row_spacing, column_spacing], 
         'SpacingBetweenSlices': slice_spacing,  
@@ -60,8 +46,6 @@ def dismantle_affine_matrix(affine):
         'ImagePositionPatient': affine[:3, 3].tolist(), # first slice for a volume
         'slice_cosine': slice_cosine.tolist()} 
 
-
-    
 
 def clip(array, value_range = None):
 

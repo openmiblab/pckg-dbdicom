@@ -250,7 +250,7 @@ class DataBaseDicom():
             dims = [dims]
         else:
             dims = list(dims)
-        dims = ['SliceLocation'] + dims
+        dims = ['SliceLocation'] + dims # replace by slice_location(ds)
 
         # Read dicom files
         values = [[] for _ in dims]
@@ -265,7 +265,15 @@ class DataBaseDicom():
             volumes.append(dbdataset.volume(ds))
 
         # Format coordinates as mesh
-        coords = [np.array(v) for v in values]
+        coords = []
+        for v in values:
+            if np.isscalar(v[0]):
+                v_arr = np.array(v)
+            else:
+                v_arr = np.empty(len(v), dtype=object)
+                v_arr[:] = v
+            coords.append(v_arr)
+        #coords = [np.array(v) for v in values]
         coords, inds = dbdicom.utils.arrays.meshvals(coords)
 
         # Check that all slices have the same coordinates
@@ -404,9 +412,9 @@ class DataBaseDicom():
                 vol.set_dims(dims[1:])
 
             volumes_2d.append(vol)
-        
-        # sort volumes by slice location
-        volumes_2d.sort(key=lambda v: dbdataset.affine_to_slice_loc(v.affine))
+
+        # Sort volumes by affine slice location
+        volumes_2d.sort(key=lambda v: affine_slice_loc(v.affine))
 
         return volumes_2d
 
@@ -545,8 +553,6 @@ class DataBaseDicom():
                 slices = vt.split()
                 for sl in slices:
                     dbdataset.set_volume(ds, sl)
-                    sl_coords = [c.ravel()[0] for c in sl.coords]
-                    set_value(ds, sl.dims, sl_coords)
                     if kwargs != {}:
                         set_values(list(kwargs.keys()), list(kwargs.values()))
                     self._write_dataset(ds, attr, n + 1 + i)
@@ -1192,4 +1198,10 @@ def infer_slice_spacing(vols):
         )    
 
     return vols.reshape(shape)
+
+
+
+def affine_slice_loc(affine):
+    slice_cosine = affine[:3, 2] / np.linalg.norm(affine[:3, 2]) 
+    return np.dot(affine[:3, 3], slice_cosine)
 

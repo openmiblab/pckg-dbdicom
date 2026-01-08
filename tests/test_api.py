@@ -104,7 +104,7 @@ def test_volume():
     assert np.linalg.norm(vol2.affine-vol.affine) == 0
 
     # 3D volume
-    values = 100*np.random.rand(128, 192, 20).astype(np.float32)
+    values = 100*np.random.rand(2, 192, 20).astype(np.float32)
     vol = vreg.volume(values)
     series = [tmp, '007', 'test', 'ax']
     db.write_volume(vol, series)
@@ -113,8 +113,10 @@ def test_volume():
     assert np.linalg.norm(vol2.affine-vol.affine) == 0
 
     # 4D volume
-    values = 100*np.random.rand(256, 256, 3, 2).astype(np.float32)
-    vol = vreg.volume(values, dims=['ImageType'], coords=(['INPHASE', 'OUTPHASE'], ), orient='coronal')
+    # values = 100*np.random.rand(256, 256, 3, 2).astype(np.float32)
+    values = 100*np.random.rand(2, 2, 2, 2).astype(np.float32)
+    image_type = [['ORIGINAL', 'INPHASE'], ['ORIGINAL', 'OUTPHASE']]
+    vol = vreg.volume(values, dims=['ImageType'], coords=(image_type, ), orient='coronal')
     series = [tmp, '007', 'dbdicom_test', 'dixon']
     db.write_volume(vol, series)
     vol2 = db.volume(series, dims=['ImageType'])
@@ -125,7 +127,7 @@ def test_volume():
 
     values = 100*np.random.rand(256, 256, 3, 2, 2).astype(np.float32)
     dims = ['FlipAngle','ImageType']
-    coords = ([10, 20], ['INPHASE', 'OUTPHASE'])
+    coords = ([10, 20], image_type)
     vol = vreg.volume(values, dims=dims, coords=coords, orient='coronal')
     series = [tmp, '007', 'dbdicom_test', 'vfa_dixon']
     db.write_volume(vol, series)
@@ -297,8 +299,8 @@ if __name__ == '__main__':
     test_volumes_2d()
     test_values()
     test_edit()
-    test_volume()
     test_write_database()
     test_copy()
+    test_volume()
 
     print('All api tests have passed!!!')

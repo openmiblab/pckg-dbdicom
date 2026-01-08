@@ -253,6 +253,15 @@ def affine(ds, multislice=False):
         slice_spacing, 
     )
 
+def slice_location(ds):
+    image_orientation = get_values(ds, 'ImageOrientationPatient')
+    image_position = get_values(ds, 'ImagePositionPatient')
+    row_cosine = np.array(image_orientation[:3])
+    column_cosine = np.array(image_orientation[3:])
+    slice_cosine = np.cross(row_cosine, column_cosine)
+    return np.dot(image_position, slice_cosine)
+
+
 def set_affine(ds, affine):
     if affine is None:
         raise ValueError('The affine cannot be set to an empty value')
@@ -262,11 +271,6 @@ def set_affine(ds, affine):
     set_values(ds, 'ImageOrientationPatient', v['ImageOrientationPatient'])
     set_values(ds, 'ImagePositionPatient', v['ImagePositionPatient'])
     set_values(ds, 'SliceLocation', np.dot(v['ImagePositionPatient'], v['slice_cosine']))
-
-
-def affine_to_slice_loc(affine):
-    v = image.dismantle_affine_matrix(affine)
-    return np.dot(v['ImagePositionPatient'], v['slice_cosine'])
 
 
 def pixel_data(ds):
