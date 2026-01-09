@@ -251,9 +251,13 @@ def affine(ds, multislice=False):
         get_values(ds, 'ImagePositionPatient'), 
         get_values(ds, 'PixelSpacing'), 
         slice_spacing, 
+    #    slice_location = get_values(ds, 'SliceLocation')
     )
 
 def slice_location(ds):
+    slice_location = get_values(ds, 'SliceLocation')
+    if slice_location is not None:
+        return slice_location
     image_orientation = get_values(ds, 'ImageOrientationPatient')
     image_position = get_values(ds, 'ImagePositionPatient')
     row_cosine = np.array(image_orientation[:3])

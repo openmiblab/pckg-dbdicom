@@ -235,19 +235,20 @@ def split_series(series:list, attr:Union[str, tuple], key=None)->list:
     return split_series
 
 
-def volume(series:list, dims:list=None, verbose=1) -> vreg.Volume3D:
+def volume(series:list, dims:list=None, verbose=1, **kwargs) -> vreg.Volume3D:
     """Read volume from a series.
 
     Args:
         series (list, str): DICOM entity to read
         dims (list, optional): Non-spatial dimensions of the volume. Defaults to None.
         verbose (bool, optional): If set to 1, shows progress bar. Defaults to 1.
+        kwargs (dict, optional): keywords to filter the series.
 
     Returns:
         vreg.Volume3D.
     """
     dbd = open(series[0])
-    vol = dbd.volume(series, dims, verbose)
+    vol = dbd.volume(series, dims, verbose, **kwargs)
     dbd.close()
     return vol
 

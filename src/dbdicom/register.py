@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import csv
 
 
@@ -58,9 +59,9 @@ def files(dbtree, entity):
     if relpath==[]:
         raise ValueError(f'No files in entity {entity}')
     if isinstance(entity, str):
-        return [os.path.join(entity, f) for f in relpath]
+        return [os.path.join(entity, str(Path(*f))) for f in relpath]
     else:
-        return [os.path.join(entity[0], f) for f in relpath]
+        return [os.path.join(entity[0], str(Path(*f))) for f in relpath]
     
 
 def index(dbtree, entity):

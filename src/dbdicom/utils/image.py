@@ -4,11 +4,12 @@ import numpy as np
 
 
 def affine_matrix(      # single slice function
-    image_orientation,  # ImageOrientationPatient
-    image_position,     # ImagePositionPatient
-    pixel_spacing,      # PixelSpacing
-    slice_spacing):     # SpacingBetweenSlices
-
+        image_orientation,  # ImageOrientationPatient
+        image_position,     # ImagePositionPatient
+        pixel_spacing,      # PixelSpacing
+        slice_spacing,      # SpacingBetweenSlices
+    #    slice_location=None,
+    ):     
     row_spacing = pixel_spacing[0]
     column_spacing = pixel_spacing[1]
     
@@ -21,7 +22,15 @@ def affine_matrix(      # single slice function
     affine[:3, 1] = column_cosine * row_spacing
     affine[:3, 2] = slice_cosine * slice_spacing
     affine[:3, 3] = image_position
-    
+
+    # if slice_location is not None:
+    #     # Use slice location to resolve ambiguity in slice cosine
+    #     loc = np.dot(image_position, slice_cosine)
+    #     # If loc = -slice_location then flip the slice cosine
+    #     # Using np.abs() here to avoid effect of small numerical error
+    #     if np.abs(loc + slice_location) < np.abs(loc - slice_location):
+    #         affine[:3, 2] *= -1
+
     return affine 
 
 

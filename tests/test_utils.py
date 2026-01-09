@@ -95,7 +95,7 @@ def test_full_name():
 
 if __name__=='__main__':
 
-    # test_meshvals()
+    test_meshvals()
     test_full_name()
 
     print('All utils tests have passed!!!')

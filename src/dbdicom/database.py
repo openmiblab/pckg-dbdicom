@@ -1,6 +1,7 @@
 import os
-from tqdm import tqdm
+from pathlib import Path
 
+from tqdm import tqdm
 import numpy as np
 import pandas as pd
 import pydicom
@@ -30,7 +31,6 @@ def read(path):
     files = filetools.all_files(path)
     tags = COLUMNS + ['NumberOfFrames'] # + ['SOPClassUID']
     array = []
-    dicom_files = []
     for i, file in tqdm(enumerate(files), total=len(files), desc='Reading DICOM folder'):
         try:
             ds = pydicom.dcmread(file, force=True, specific_tags=tags+['Rows'])
@@ -42,11 +42,13 @@ def read(path):
                     if not 'Rows' in ds: # Image only
                         continue
                     row = get_values(ds, tags)
-                    array.append(row)
                     index = os.path.relpath(file, path)
-                    dicom_files.append(index) 
-    df = pd.DataFrame(array, index = dicom_files, columns = tags)
-    df = _multiframe_to_singleframe(path, df)
+                    p = Path(index)
+                    parts = list(p.parts)
+                    row = [parts] + row
+                    array.append(row)
+    df = pd.DataFrame(array, columns = ['rel_path'] + tags)
+    df = _multiframe_to_singleframe(path, df) # needs updating and testing
     dbtree = _tree(df)
     return dbtree
 
@@ -61,12 +63,17 @@ def _multiframe_to_singleframe(path, df):
     multiframe = singleframe == False
     nr_multiframe = multiframe.sum()
     if nr_multiframe != 0: 
+        raise ValueError(
+            "dbdicom currently does not support multiframe data."
+            "Please remove them from the database and try again."
+            )
         for relpath in tqdm(df[multiframe].index.values, desc="Converting multiframe file " + relpath):
-            filepath = os.path.join(path, relpath)
-            singleframe_files = dcm4che.split_multiframe(filepath) 
+            filepath = [path] + [relpath]
+            filepath = Path(*filepath)
+            singleframe_files = dcm4che.split_multiframe(str(filepath)) 
             if singleframe_files != []:            
                 # add the single frame files to the dataframe
-                dfnew = read(singleframe_files, df.columns, path)
+                dfnew = read(singleframe_files, df.columns, path) # This needs fixing
                 df = pd.concat([df, dfnew])
                 # delete the original multiframe 
                 os.remove(filepath)
@@ -120,7 +127,7 @@ def _tree(df):
                 for uid_instance in df_series.SOPInstanceUID.unique():
                     df_instance = df_series[df_series.SOPInstanceUID == uid_instance]
                     instance_nr = int(df_instance.InstanceNumber.values[0])
-                    relpath = df_instance.index[0]
+                    relpath = df_instance.rel_path.values[0]
                     series['instances'][instance_nr]=relpath
 
     return summary
