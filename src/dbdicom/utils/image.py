@@ -4,11 +4,12 @@ import numpy as np
 
 
 def affine_matrix(      # single slice function
-    image_orientation,  # ImageOrientationPatient
-    image_position,     # ImagePositionPatient
-    pixel_spacing,      # PixelSpacing
-    slice_spacing):     # SpacingBetweenSlices
-
+        image_orientation,  # ImageOrientationPatient
+        image_position,     # ImagePositionPatient
+        pixel_spacing,      # PixelSpacing
+        slice_spacing,      # SpacingBetweenSlices
+    #    slice_location=None,
+    ):     
     row_spacing = pixel_spacing[0]
     column_spacing = pixel_spacing[1]
     
@@ -21,25 +22,16 @@ def affine_matrix(      # single slice function
     affine[:3, 1] = column_cosine * row_spacing
     affine[:3, 2] = slice_cosine * slice_spacing
     affine[:3, 3] = image_position
-    
+
+    # if slice_location is not None:
+    #     # Use slice location to resolve ambiguity in slice cosine
+    #     loc = np.dot(image_position, slice_cosine)
+    #     # If loc = -slice_location then flip the slice cosine
+    #     # Using np.abs() here to avoid effect of small numerical error
+    #     if np.abs(loc + slice_location) < np.abs(loc - slice_location):
+    #         affine[:3, 2] *= -1
+
     return affine 
-
-
-# def slice_location( 
-#         image_orientation:list,  # ImageOrientationPatient
-#         image_position:list,    # ImagePositionPatient
-#     ) -> float:
-#     """Calculate Slice Location"""
-
-#     row_cosine = np.array(image_orientation[:3])    
-#     column_cosine = np.array(image_orientation[3:]) 
-#     slice_cosine = np.cross(row_cosine, column_cosine)
-
-#     # # The coronal orientation has a left-handed reference frame
-#     # if np.array_equal(np.around(image_orientation, 3), [1,0,0,0,0,-1]):
-#     #     slice_cosine = -slice_cosine
-
-#     return np.dot(np.array(image_position), slice_cosine)
 
 
 def dismantle_affine_matrix(affine):
@@ -53,6 +45,9 @@ def dismantle_affine_matrix(affine):
     row_cosine = affine[:3, 0] / column_spacing
     column_cosine = affine[:3, 1] / row_spacing
     slice_cosine = affine[:3, 2] / slice_spacing
+    # Change to the most common definition - affine[:3, 2] is not even guaranteed to be perp.
+    # It is also consistent with def affine_matrix
+    # slice_cosine = np.cross(row_cosine, column_cosine) 
     return {
         'PixelSpacing': [row_spacing, column_spacing], 
         'SpacingBetweenSlices': slice_spacing,  
@@ -60,8 +55,6 @@ def dismantle_affine_matrix(affine):
         'ImagePositionPatient': affine[:3, 3].tolist(), # first slice for a volume
         'slice_cosine': slice_cosine.tolist()} 
 
-
-    
 
 def clip(array, value_range = None):
 

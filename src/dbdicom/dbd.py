@@ -5,6 +5,7 @@ from typing import Union
 import zipfile
 import re
 from copy import deepcopy
+from pathlib import Path
 
 from tqdm import tqdm
 import numpy as np
@@ -90,12 +91,12 @@ class DataBaseDicom():
                     f"You can set not_exists_ok=True in dbdicom.delete() to avoid this error."
                 )
         for index in removed:
-            file = os.path.join(self.path, index)
+            file = os.path.join(self.path, str(Path(*index)))
             if os.path.exists(file): 
                 os.remove(file)
-        # drop the entity from the register
+        # Drop the entity from the register
         register.remove(self.register, entity)
-        # cleanup empty folders
+        # Cleanup empty folders
         remove_empty_folders(entity[0])
         return self
     
@@ -110,8 +111,9 @@ class DataBaseDicom():
             json.dump(self.register, f, indent=4)
         return self
 
+
     def _register_file(self):
-        return os.path.join(self.path, 'dbtree.json') 
+        return os.path.join(self.path, 'index.json') 
     
 
     def summary(self):
@@ -228,13 +230,14 @@ class DataBaseDicom():
             return register.series(self.register, entity, desc, contains, isin)
 
 
-    def volume(self, entity:Union[list, str], dims:list=None, verbose=1) -> vreg.Volume3D:
+    def volume(self, entity:Union[list, str], dims:list=None, verbose=1, **kwargs) -> vreg.Volume3D:
         """Read volume.
 
         Args:
             entity (list, str): DICOM series to read
             dims (list, optional): Non-spatial dimensions of the volume. Defaults to None.
             verbose (bool, optional): If set to 1, shows progress bar. Defaults to 1.
+            kwargs (dict, optional): keywords to filter the series.
 
         Returns:
             vreg.Volume3D:
@@ -250,7 +253,7 @@ class DataBaseDicom():
             dims = [dims]
         else:
             dims = list(dims)
-        dims = ['SliceLocation'] + dims
+        dims = ['SliceLocation'] + dims # replace by slice_location(ds)
 
         # Read dicom files
         values = [[] for _ in dims]
@@ -259,14 +262,31 @@ class DataBaseDicom():
         files = register.files(self.register, entity)
         for f in tqdm(files, desc='Reading volume..', disable=(verbose==0)):
             ds = pydicom.dcmread(f)
+
+            # Check if the file can be used
+            if _skip(ds, kwargs):
+                continue
+
             values_f = get_values(ds, dims)
             for d in range(len(dims)):
                 values[d].append(values_f[d])
             volumes.append(dbdataset.volume(ds))
 
+        # check slice cosines and reverse if needed
+        volumes = check_slice_cosines(volumes, values[0])
+
         # Format coordinates as mesh
-        coords = [np.array(v) for v in values]
-        coords, inds = dbdicom.utils.arrays.meshvals(coords)
+        # coords = []
+        # for v in values:
+        #     if np.isscalar(v[0]):
+        #         v_arr = np.array(v)
+        #     else:
+        #         v_arr = np.empty(len(v), dtype=object)
+        #         v_arr[:] = v
+        #     coords.append(v_arr)
+        #coords = [np.array(v) for v in values]
+        #coords, inds = dbdicom.utils.arrays.meshvals(coords)
+        coords, inds = dbdicom.utils.arrays.meshvals(values)
 
         # Check that all slices have the same coordinates
         if len(dims) > 1:
@@ -290,15 +310,16 @@ class DataBaseDicom():
         vols = infer_slice_spacing(vols)
 
         # Join 2D volumes into 3D volumes
-        try:
-            vol = vreg.join(vols)
-        except ValueError:
-            # some vendors define the slice vector as -cross product 
-            # of row and column vector. Check if that solves the issue.
-            for v in vols.reshape(-1):
-                v.affine[:3,2] = -v.affine[:3,2]
-                # Then try again
-            vol = vreg.join(vols)
+        vol = vreg.join(vols)
+        # try:
+        #     vol = vreg.join(vols)
+        # except ValueError:
+        #     # some vendors define the slice vector as -cross product 
+        #     # of row and column vector. Check if that solves the issue.
+        #     for v in vols.reshape(-1):
+        #         v.affine[:3,2] = -v.affine[:3,2]
+        #         # Then try again
+        #     vol = vreg.join(vols)
 
         # For multi-dimensional volumes, set dimensions and coordinates
         if vol.ndim > 3:
@@ -309,7 +330,12 @@ class DataBaseDicom():
         return vol
 
 
-    def volumes_2d(self, entity:Union[list, str], dims:list=None, verbose=1) -> list:
+    # Obsolete API - phase out
+    def volumes_2d(self, *args, **kwargs):
+        return self.slices(*args, **kwargs)
+    
+
+    def slices(self, entity:Union[list, str], dims:list=None, verbose=1) -> list:
         """Read 2D volumes from the series
 
         Args:
@@ -369,8 +395,9 @@ class DataBaseDicom():
             vals_list = values[slice_loc]
 
             # Format coordinates as mesh
-            coords = [np.array(v) for v in vals_list]
-            coords, inds = dbdicom.utils.arrays.meshvals(coords)
+            # coords = [np.array(v) for v in vals_list]
+            # coords, inds = dbdicom.utils.arrays.meshvals(coords)
+            coords, inds = dbdicom.utils.arrays.meshvals(vals_list)
 
             # Check that all slices have the same coordinates
             if len(dims) > 1:
@@ -400,7 +427,10 @@ class DataBaseDicom():
                 vol.set_dims(dims[1:])
 
             volumes_2d.append(vol)
-            
+
+        # Sort volumes by affine slice location
+        volumes_2d.sort(key=lambda v: affine_slice_loc(v.affine))
+
         return volumes_2d
 
 
@@ -470,11 +500,13 @@ class DataBaseDicom():
                 attr_values[a].append(attr_values_f[a])
 
         # Format coordinates as mesh
-        coords = [np.array(v) for v in coord_values]
-        coords, inds = dbdicom.utils.arrays.meshvals(coords)
+        # coords = [np.array(v) for v in coord_values]
+        # coords, inds = dbdicom.utils.arrays.meshvals(coords)
+        coords, inds = dbdicom.utils.arrays.meshvals(coord_values)
 
         # Sort values accordingly
-        values = [np.array(v) for v in attr_values]
+        #values = [np.array(v) for v in attr_values]
+        values = dbdicom.utils.arrays.to_array_list(attr_values)
         values = [v[inds].reshape(coords[0].shape) for v in values]
 
         # Return values
@@ -538,8 +570,6 @@ class DataBaseDicom():
                 slices = vt.split()
                 for sl in slices:
                     dbdataset.set_volume(ds, sl)
-                    sl_coords = [c.ravel()[0] for c in sl.coords]
-                    set_value(ds, sl.dims, sl_coords)
                     if kwargs != {}:
                         set_values(list(kwargs.keys()), list(kwargs.values()))
                     self._write_dataset(ds, attr, n + 1 + i)
@@ -585,8 +615,9 @@ class DataBaseDicom():
                 coord_values[d].append(coord_values_f[d])
 
         # Format coordinates as mesh
-        coords = [np.array(v) for v in coord_values]
-        coords, inds = dbdicom.utils.arrays.meshvals(coords)
+        # coords = [np.array(v) for v in coord_values]
+        # coords, inds = dbdicom.utils.arrays.meshvals(coords)
+        coords, inds = dbdicom.utils.arrays.meshvals(coord_values)
 
         # Sort files accordingly
         files = np.array(files)[inds]
@@ -616,7 +647,7 @@ class DataBaseDicom():
 
         # Delete the originals files
         register.drop(self.register, to_drop)
-        [os.remove(os.path.join(self.path, idx)) for idx in to_drop]
+        [os.remove(os.path.join(self.path, str(Path(*idx)))) for idx in to_drop]
 
         return self
 
@@ -720,6 +751,7 @@ class DataBaseDicom():
             return values[0]
         else:
             return {p: values[i] for i, p in enumerate(pars)} 
+        
     
     def copy(self, from_entity, to_entity=None):
         """Copy a DICOM  entity (patient, study or series)
@@ -1019,18 +1051,21 @@ class DataBaseDicom():
         attr['InstanceNumber'] = str(instance_nr)
         set_values(ds, list(attr.keys()), list(attr.values()))
         # Save results in a new file
-        rel_dir = os.path.join(
+        rel_dir = [
             f"Patient__{attr['PatientID']}", 
             f"Study__{attr['StudyID']}__{attr['StudyDescription']}", 
             f"Series__{attr['SeriesNumber']}__{attr['SeriesDescription']}",
-        )
-        os.makedirs(os.path.join(self.path, rel_dir), exist_ok=True)
-        rel_path = os.path.join(rel_dir, pydicom.uid.generate_uid() + '.dcm')
-        dbdataset.write(ds, os.path.join(self.path, rel_path))
+        ]
+        dir = os.path.join(self.path, str(Path(*rel_dir)))
+        os.makedirs(dir, exist_ok=True)
+        filename = pydicom.uid.generate_uid() + '.dcm'
+        dbdataset.write(ds, os.path.join(dir, filename))
         # Add an entry in the register
+        rel_path = rel_dir + [filename]
         register.add_instance(self.register, attr, rel_path)
 
 
+    # TODO: deprecate
     def archive(self, archive_path):
         # TODO add flat=True option for zipping at patient level
         for pt in tqdm(self.register, desc='Archiving '):
@@ -1051,7 +1086,7 @@ class DataBaseDicom():
                     try:
                         with zipfile.ZipFile(zip_file, 'w') as zipf:
                             for rel_path in sr['instances'].values():
-                                file = os.path.join(self.path, rel_path)
+                                file = os.path.join(self.path, str(Path(*rel_path)))
                                 zipf.write(file, arcname=os.path.basename(file))
                     except Exception as e:
                         raise RuntimeError(
@@ -1130,6 +1165,58 @@ def remove_empty_folders(path):
                 print(f"Error removing {dirpath}: {e}")
 
 
+def check_slice_cosines(vols, locs):
+
+    # If not all slice locations are defined there is nothing to check
+    if None in locs:
+        return vols
+
+    # Count the number of volumes with correct slice locs
+    cnt = _count_correct_slice_locations(vols, locs)
+
+    # If they are all correct, we are done
+    if cnt == len(vols):
+        return vols
+    
+    # If not, flip the slice cosine and count again
+    for v in vols:
+        v.affine[:3, 2] *= -1
+    cnt = _count_correct_slice_locations(vols, locs)
+
+    # If they are all correct, we are done
+    if cnt == len(vols):
+        return vols
+    
+    # # Otherwise raise an error as slice locations must be corrupt    
+    # raise ValueError(
+    #     "Corrupted DICOM files: not all SliceLocation values match up "
+    #     "with the ImagePositionPatient."
+    # )
+
+    # Otherwise flip back and return as is
+    for v in vols:
+        v.affine[:3, 2] *= -1
+    return vols
+
+
+def _count_correct_slice_locations(vols, locs):
+    
+    slice_cosine_0 = vols[0].affine[:3, 2]
+    cnt = 0
+    for i, v in enumerate(vols):
+        slice_cosine = v.affine[:3, 2]
+        if not np.array_equal(slice_cosine_0, slice_cosine):
+            raise ValueError(
+                "Cannot read volume: not all slices have the same orientation. "
+                "Split the series by ImageOrientationPatient and try again."
+            )
+        slice_pos = v.affine[:3, 3]
+        slice_loc = np.dot(slice_pos, slice_cosine)
+        diff = np.around(locs[i] - slice_loc, 2) # precision 10-2 mm
+        if diff == 0:
+            cnt += 1
+    return cnt
+
 
 def infer_slice_spacing(vols):
     # In case spacing between slices is not (correctly) encoded in 
@@ -1184,4 +1271,20 @@ def infer_slice_spacing(vols):
         )    
 
     return vols.reshape(shape)
+
+
+
+def affine_slice_loc(affine):
+    slice_cosine = affine[:3, 2] / np.linalg.norm(affine[:3, 2]) 
+    return np.dot(affine[:3, 3], slice_cosine)
+
+
+def _skip(ds, kwargs):
+    if kwargs == {}:
+        return False
+    fltrs = get_values(ds, list(kwargs.keys()))
+    for i, f in enumerate(kwargs.values()):
+        if fltrs[i] != f:
+            return True
+    return False
 

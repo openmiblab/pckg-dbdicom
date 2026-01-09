@@ -2,8 +2,19 @@ import numpy as np
 
 from typing import List, Tuple
 
+def to_array_list(values):
+    arrays = []
+    for v in values:
+        if np.isscalar(v[0]):
+            v_arr = np.array(v)
+        else:
+            v_arr = np.empty(len(v), dtype=object)
+            v_arr[:] = v
+        arrays.append(v_arr)
+    return arrays
 
-def meshvals(arrays) -> Tuple[List[np.ndarray], np.ndarray]:
+
+def meshvals(values) -> Tuple[List[np.ndarray], np.ndarray]:
     """
     Lexicographically sort flattened N coordinate arrays and reshape back to inferred grid shape,
     preserving original type of each input array.
@@ -22,6 +33,9 @@ def meshvals(arrays) -> Tuple[List[np.ndarray], np.ndarray]:
     shape : tuple[int, ...]
         Inferred grid shape (number of unique values per axis).
     """
+    # Ensure the list elements are arrays
+    arrays = to_array_list(values)
+
     # Remember original type/dtype for each array
     orig_types = [a.dtype if isinstance(a[0], np.ndarray) else type(a[0]) for a in arrays]
 

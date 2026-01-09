@@ -104,7 +104,7 @@ def test_volume():
     assert np.linalg.norm(vol2.affine-vol.affine) == 0
 
     # 3D volume
-    values = 100*np.random.rand(128, 192, 20).astype(np.float32)
+    values = 100*np.random.rand(2, 192, 20).astype(np.float32)
     vol = vreg.volume(values)
     series = [tmp, '007', 'test', 'ax']
     db.write_volume(vol, series)
@@ -113,19 +113,21 @@ def test_volume():
     assert np.linalg.norm(vol2.affine-vol.affine) == 0
 
     # 4D volume
-    values = 100*np.random.rand(256, 256, 3, 2).astype(np.float32)
-    vol = vreg.volume(values, dims=['ImageType'], coords=(['INPHASE', 'OUTPHASE'], ), orient='coronal')
+    # values = 100*np.random.rand(256, 256, 3, 2).astype(np.float32)
+    values = 100*np.random.rand(2, 2, 2, 2).astype(np.float32)
+    image_type = [['ORIGINAL', 'INPHASE'], ['ORIGINAL', 'OUTPHASE']]
+    vol = vreg.volume(values, dims=['ImageType'], coords=(image_type, ), orient='coronal')
     series = [tmp, '007', 'dbdicom_test', 'dixon']
     db.write_volume(vol, series)
     vol2 = db.volume(series, dims=['ImageType'])
-    assert np.linalg.norm(vol2.values-vol.values) < 0.0001*np.linalg.norm(vol.values)
+    assert np.linalg.norm(vol2.values-vol.values) < 0.0001 * np.linalg.norm(vol.values)
     assert np.linalg.norm(vol2.affine-vol.affine) == 0
     assert vol2.dims == vol.dims
     assert np.array_equal(vol2.coords[0], vol.coords[0])
 
     values = 100*np.random.rand(256, 256, 3, 2, 2).astype(np.float32)
     dims = ['FlipAngle','ImageType']
-    coords = ([10, 20], ['INPHASE', 'OUTPHASE'])
+    coords = ([10, 20], image_type)
     vol = vreg.volume(values, dims=dims, coords=coords, orient='coronal')
     series = [tmp, '007', 'dbdicom_test', 'vfa_dixon']
     db.write_volume(vol, series)
@@ -134,6 +136,10 @@ def test_volume():
     assert np.linalg.norm(vol2.affine-vol.affine) == 0
     assert vol2.dims == vol.dims
     assert np.array_equal(vol2.coords[0], vol.coords[0])
+
+    # Test filtering feature
+    vol3 = db.volume(series, dims=['FlipAngle'], ImageType=['ORIGINAL', 'INPHASE'])
+    assert np.linalg.norm(vol3.values-vol.values[...,0]) < 0.0001*np.linalg.norm(vol.values[...,0])
 
     shutil.rmtree(tmp)
 
@@ -291,14 +297,33 @@ def test_copy():
     shutil.rmtree(tmp)
 
 
+def test_db_read():
+
+    # Build some data
+    tmp1 = os.path.join(tmp, 'dir')
+    os.makedirs(tmp1, exist_ok=True)
+    values = np.arange(16 * 16 * 4).reshape((16, 16, 4))
+    vol = vreg.volume(values)
+    series = [tmp1, '007', 'test', 'ax']
+    db.write_volume(vol, series)
+
+    # Delete the index file and read again
+    idx = os.path.join(tmp1, 'index.json')
+    os.remove(idx)
+    vol_rec = db.volume(series)
+    assert np.linalg.norm(vol_rec.values - vol.values) == 0
+
+
+
 if __name__ == '__main__':
 
     test_write_volume()
     test_volumes_2d()
     test_values()
     test_edit()
-    test_volume()
     test_write_database()
     test_copy()
+    test_volume()
+    test_db_read()
 
     print('All api tests have passed!!!')
