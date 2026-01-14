@@ -12,6 +12,97 @@ os.makedirs(tmp, exist_ok=True)
 
 
 
+def test_dti_volume():
+
+    dti_series = [tmp, '007', 'diff_test', 'DTI']
+    dims = ['DiffusionBValue', 'DiffusionGradientOrientation']
+
+    # Define pixel values
+    arr = np.ones(16 * 16 * 4).reshape((16, 16, 4, 1, 1))
+    b0 = 0 * arr
+    b700_1 = 1 * arr
+    b700_2 = 2 * arr
+    b700_3 = 3 * arr
+
+    # Define coordinates
+    b0_coords = ([0], [[0,0,0]])
+    b700_1_coords = ([700], [[0,0,1]])
+    b700_2_coords = ([700], [[0,1,0]])
+    b700_3_coords = ([700], [[1,0,0]])
+
+    # Build volumes
+    b0_vol = vreg.volume(b0, dims=dims, coords=b0_coords)
+    b700_1_vol = vreg.volume(b700_1, dims=dims, coords=b700_1_coords)
+    b700_2_vol = vreg.volume(b700_2, dims=dims, coords=b700_2_coords)
+    b700_3_vol = vreg.volume(b700_3, dims=dims, coords=b700_3_coords)
+
+    # Save in a single dicom series
+    db.write_volume(b0_vol, dti_series)
+    db.write_volume(b700_1_vol, dti_series, append=True)
+    db.write_volume(b700_2_vol, dti_series, append=True)
+    db.write_volume(b700_3_vol, dti_series, append=True)
+
+    # The series is not a single volume, so this fails:
+    try:
+        db.volume(dti_series)
+    except:
+        assert True
+    else:
+        assert False
+
+    # Sorting by dimensions does not work either 
+    # because b0 and b700 have different shape
+    try:
+        db.volume(dti_series, dims=dims)
+    except:
+        assert True
+    else:
+        assert False
+
+    # What does work is use a filter to separate out b0 and b700:
+    b0_vol_rec = db.volume(dti_series, dims=dims, DiffusionBValue=0)
+    b700_vol_rec = db.volume(dti_series, dims=dims, DiffusionBValue=700)
+
+    # Check the shapes and values
+    assert b0_vol_rec.shape == (16, 16, 4, 1, 1)
+    assert b700_vol_rec.shape == (16, 16, 4, 1, 3)
+
+    # Check coordinates
+    assert b0_vol_rec.coords[0][0,0] == 0
+    assert b700_vol_rec.coords[0][0,2] == 700
+    assert np.array_equal(b0_vol_rec.coords[1][0,0], [0,0,0])
+    assert np.array_equal(b700_vol_rec.coords[1][0,2], [1,0,0])
+
+    # Check values
+    assert np.array_equal(b0_vol_rec.values, b0_vol.values)
+    assert np.array_equal(b700_vol_rec.values[...,0], b700_1[...,0])
+    assert np.array_equal(b700_vol_rec.values[...,1], b700_2[...,0])
+    assert np.array_equal(b700_vol_rec.values[...,2], b700_3[...,0])
+
+    # If we are not interested in reading all coordinates, 
+    # we can also read differently as below:
+
+    # b0 is just a single 3D volume so we don't have to specify dimensions
+    b0_vol_rec = db.volume(dti_series, DiffusionBValue=0)
+
+    # Now this has a 3D shape
+    assert b0_vol_rec.shape == (16, 16, 4)
+    assert b0_vol_rec.dims is None
+    assert b0_vol_rec.coords is None
+    assert np.array_equal(b0_vol_rec.values, b0_vol.values[...,0,0])
+
+    # b700 has only one b-value so we just need to specify orientation as dimensions
+    b700_vol_rec = db.volume(dti_series, dims='DiffusionGradientOrientation', DiffusionBValue=700)
+
+    # This has 4D shape
+    assert b700_vol_rec.shape == (16, 16, 4, 3)
+    assert np.array_equal(b700_vol_rec.dims, ['DiffusionGradientOrientation'])
+    assert np.array_equal(b700_vol_rec.coords[0][2], [1,0,0])
+    assert np.array_equal(b700_vol_rec.values[...,2], b700_3[...,0,0])
+
+
+    shutil.rmtree(tmp)
+
 
 def test_write_volume():
 
@@ -313,10 +404,86 @@ def test_db_read():
     vol_rec = db.volume(series)
     assert np.linalg.norm(vol_rec.values - vol.values) == 0
 
+    shutil.rmtree(tmp)
+
+
+def test_rw_series():
+
+    # Write three series with the same desc in the same study
+    tmp1 = os.path.join(tmp, 'dir1')
+    os.makedirs(tmp1, exist_ok=True)
+    values_1 = 1 * np.arange(16 * 16 * 4).reshape((16, 16, 4))
+    values_2 = 2 * np.arange(16 * 16 * 4).reshape((16, 16, 4))
+    values_3 = 3 * np.arange(16 * 16 * 4).reshape((16, 16, 4))
+    vol_1 = vreg.volume(values_1)
+    vol_2 = vreg.volume(values_2)
+    vol_3 = vreg.volume(values_3)
+    series_1 = [tmp1, '007', 'test', ('ax', 0)]
+    series_2 = [tmp1, '007', 'test', ('ax', 1)]
+    series_3 = [tmp1, '007', 'test', ('ax', 2)]
+
+    db.write_volume(vol_1, series_1)
+    db.write_volume(vol_2, series_2)
+    db.write_volume(vol_3, series_3)
+
+    try:
+        db.write_volume(vol_2, [tmp1, '007', 'test', 'ax'])
+    except:
+        assert True
+    else:
+        assert False
+
+    v_3 = db.volume(series_3)
+    assert np.array_equal(v_3.values, values_3)
+
+    v_3 = db.volume([tmp1, '007', 'test', ('ax', -1)])
+    assert np.array_equal(v_3.values, values_3)
+
+    shutil.rmtree(tmp)
+
+
+def test_rw_studies():
+
+    # Write three series with the same desc in the same study
+    tmp1 = os.path.join(tmp, 'dir1')
+    os.makedirs(tmp1, exist_ok=True)
+    values_1 = 1 * np.arange(16 * 16 * 4).reshape((16, 16, 4))
+    values_2 = 2 * np.arange(16 * 16 * 4).reshape((16, 16, 4))
+    values_3 = 3 * np.arange(16 * 16 * 4).reshape((16, 16, 4))
+    vol_1 = vreg.volume(values_1)
+    vol_2 = vreg.volume(values_2)
+    vol_3 = vreg.volume(values_3)
+    series_1 = [tmp1, '007', ('test', 0), 'ax']
+    series_2 = [tmp1, '007', ('test', 1), 'ax']
+    series_3 = [tmp1, '007', ('test', 2), 'ax']
+
+    db.write_volume(vol_1, series_1)
+    db.write_volume(vol_2, series_2)
+    db.write_volume(vol_3, series_3)
+
+    try:
+        db.write_volume(vol_2, [tmp1, '007', 'test', 'ax'])
+    except:
+        assert True
+    else:
+        assert False
+
+    v_2 = db.volume([tmp1, '007', ('test', 1), 'ax'])
+    assert np.array_equal(v_2.values, values_2)
+
+    v_3 = db.volume([tmp1, '007', ('test', 2), 'ax'])
+    assert np.array_equal(v_3.values, values_3)
+
+    v_3 = db.volume([tmp1, '007', ('test', -1), 'ax'])
+    assert np.array_equal(v_3.values, values_3)
+
+    shutil.rmtree(tmp)
+
 
 
 if __name__ == '__main__':
 
+    test_dti_volume()
     test_write_volume()
     test_volumes_2d()
     test_values()
@@ -325,5 +492,7 @@ if __name__ == '__main__':
     test_copy()
     test_volume()
     test_db_read()
+    test_rw_series()
+    test_rw_studies()
 
     print('All api tests have passed!!!')
