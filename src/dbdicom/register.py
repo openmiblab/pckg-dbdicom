@@ -7,6 +7,13 @@ class AmbiguousError(Exception):
     pass
 
 
+def _sort_study(st):
+    if st['StudyID'] is not None:
+        return st['StudyID']
+    # Need a backup as StudyID is not required in DICOM
+    return st['StudyInstanceUID']
+
+
 def add_instance(dbtree:list, attr, rel_path):
     
     # Get patient and create if needed
@@ -22,7 +29,7 @@ def add_instance(dbtree:list, attr, rel_path):
         pt = pts[0]
     
     # Get study and create if needed
-    sts = [st for st in sorted(pt['studies'], key=lambda st: st['StudyInstanceUID']) if st['StudyInstanceUID']==attr['StudyInstanceUID']]
+    sts = [st for st in sorted(pt['studies'], key=_sort_study) if st['StudyInstanceUID']==attr['StudyInstanceUID']]
     if sts==[]:
         st = {
             'StudyDescription': attr['StudyDescription'],
@@ -68,7 +75,7 @@ def index(dbtree, entity):
     if isinstance(entity, str):
         idx = []
         for pt in sorted(dbtree, key=lambda pt: pt['PatientID']):
-            for st in sorted(pt['studies'], key=lambda st: st['StudyInstanceUID']):
+            for st in sorted(pt['studies'], key=_sort_study):
                 for sr in sorted(st['series'], key=lambda sr: sr['SeriesNumber']):
                     idx += list(sr['instances'].values())
         return idx
@@ -77,7 +84,7 @@ def index(dbtree, entity):
         idx = []
         for pt in sorted(dbtree, key=lambda pt: pt['PatientID']):
             if pt['PatientID'] == patient_id:
-                for st in sorted(pt['studies'], key=lambda st: st['StudyInstanceUID']):
+                for st in sorted(pt['studies'], key=_sort_study):
                     for sr in sorted(st['series'], key=lambda sr: sr['SeriesNumber']):
                         idx += list(sr['instances'].values())
                 return idx
@@ -86,7 +93,7 @@ def index(dbtree, entity):
         study_uid = uid(dbtree, entity)
         idx = []
         for pt in sorted(dbtree, key=lambda pt: pt['PatientID']):
-            for st in sorted(pt['studies'], key=lambda st: st['StudyInstanceUID']):
+            for st in sorted(pt['studies'], key=_sort_study):
                 if st['StudyInstanceUID'] == study_uid:
                     for sr in sorted(st['series'], key=lambda sr: sr['SeriesNumber']):
                         idx += list(sr['instances'].values())
@@ -95,7 +102,7 @@ def index(dbtree, entity):
     elif len(entity)==4:
         series_uid = uid(dbtree, entity)
         for pt in sorted(dbtree, key=lambda pt: pt['PatientID']):
-            for st in sorted(pt['studies'], key=lambda st: st['StudyInstanceUID']):
+            for st in sorted(pt['studies'], key=_sort_study):
                 for sr in sorted(st['series'], key=lambda sr: sr['SeriesNumber']):
                     if sr['SeriesInstanceUID'] == series_uid:
                         return list(sr['instances'].values())
@@ -110,13 +117,13 @@ def remove(dbtree, entity):
     elif len(entity)==3:
         study_uid = uid(dbtree, entity)
         for pt in sorted(dbtree, key=lambda pt: pt['PatientID']):
-            for st in sorted(pt['studies'], key=lambda st: st['StudyInstanceUID']):
+            for st in sorted(pt['studies'], key=_sort_study):
                 if st['StudyInstanceUID'] == study_uid:
                     pt['studies'].remove(st)
     elif len(entity)==4:
         series_uid = uid(dbtree, entity)
         for pt in sorted(dbtree, key=lambda pt: pt['PatientID']):
-            for st in sorted(pt['studies'], key=lambda st: st['StudyInstanceUID']):
+            for st in sorted(pt['studies'], key=_sort_study):
                 for sr in sorted(st['series'], key=lambda sr: sr['SeriesNumber']):
                     if sr['SeriesInstanceUID'] == series_uid:
                         st['series'].remove(sr)
@@ -125,7 +132,7 @@ def remove(dbtree, entity):
 
 def drop(dbtree, relpaths):
     for pt in sorted(dbtree[:], key=lambda pt: pt['PatientID']):
-        for st in sorted(pt['studies'][:], key=lambda st: st['StudyInstanceUID']):
+        for st in sorted(pt['studies'][:], key=_sort_study):
             for sr in sorted(st['series'][:], key=lambda sr: sr['SeriesNumber']):
                 for nr, relpath in list(sr['instances'].items()):
                     if relpath in relpaths:
@@ -152,65 +159,125 @@ def study_uid(dbtree, study):
     for pt in sorted(dbtree, key=lambda pt: pt['PatientID']):
         if pt['PatientID'] == patient_id:
 
-            uid_studies = {}
-            study_idx = {}
-            for st in sorted(pt['studies'], key=lambda st: st['StudyInstanceUID']):
+            studies = {}
+            for st in sorted(pt['studies'], key=_sort_study):
                 study_desc = st['StudyDescription']
                 uid_study = st['StudyInstanceUID']
-                if study_desc in study_idx:
-                    study_idx[study_desc] += 1
+                if study_desc not in studies:
+                    studies[study_desc] = [uid_study]
                 else:
-                    study_idx[study_desc] = 0
-                study_desc = (study_desc, study_idx[study_desc])
-                if study == study_desc:
-                    return uid_study
-                uid_studies[study_desc] = uid_study
+                    studies[study_desc].append(uid_study)
 
             if isinstance(study, str):
-                studies_list = [s for s in uid_studies.keys() if s[0]==study]
-                if len(studies_list) == 1:
-                    return uid_studies[(study, 0)]
-                elif len(studies_list) > 1:
-                    raise AmbiguousError(
-                        f"Multiple studies with name {study}. "
-                        f"Please specify the index along with the description. "
-                        f"For instance ({study}, {len(uid_studies)-1})'. "
-                    )
-            raise ValueError(f"Study {study} not found in patient {patient_id}.")
+                if study not in studies:
+                    raise ValueError(f"Series {study} not found in patient {patient_id}.")
+                if len(studies[study]) == 1:
+                    return studies[study][0]
+                raise ValueError(
+                    f"Multiple studies with name {study} in patient {patient_id}. "
+                    f"Please specify the index along with the description. "
+                    f"For instance ({study}, {len(studies)-1})'. "
+                )
+            else:
+                if study[0] not in studies:
+                    raise ValueError(f"Series {study[0]} not found in patient {patient_id}.")
+                try:
+                    return studies[study[0]][study[1]]
+                except IndexError:
+                    raise ValueError(
+                        f"Index {study[1]} is out of bounds for series {study[0]}. "
+                        f"The are {len(studies[study[0]])} series with description {study[0]} in study {study}."
+                    )       
+
+            # uid_studies = {}
+            # study_idx = {}
+            # for st in sorted(pt['studies'], key=lambda st: st['StudyInstanceUID']):
+            #     study_desc = st['StudyDescription']
+            #     uid_study = st['StudyInstanceUID']
+            #     if study_desc in study_idx:
+            #         study_idx[study_desc] += 1
+            #     else:
+            #         study_idx[study_desc] = 0
+            #     study_desc = (study_desc, study_idx[study_desc])
+            #     if study == study_desc:
+            #         return uid_study
+            #     uid_studies[study_desc] = uid_study
+
+            # if isinstance(study, str):
+            #     studies_list = [s for s in uid_studies.keys() if s[0]==study]
+            #     if len(studies_list) == 1:
+            #         return uid_studies[(study, 0)]
+            #     elif len(studies_list) > 1:
+            #         raise AmbiguousError(
+            #             f"Multiple studies with name {study}. "
+            #             f"Please specify the index along with the description. "
+            #             f"For instance ({study}, {len(uid_studies)-1})'. "
+            #         )
+            # raise ValueError(f"Study {study} not found in patient {patient_id}.")
 
 
 def series_uid(dbtree, series): # absolute path to series
     uid_study = study_uid(dbtree, series[:-1])
     study, sery = series[2], series[3]
     for pt in sorted(dbtree, key=lambda pt: pt['PatientID']):
-        for st in sorted(pt['studies'], key=lambda st: st['StudyInstanceUID']):
+        for st in sorted(pt['studies'], key=_sort_study):
             if st['StudyInstanceUID'] == uid_study:
 
                 series = {}
-                series_idx = {}
                 for sr in sorted(st['series'], key=lambda sr: sr['SeriesNumber']):
                     series_desc = sr['SeriesDescription']
                     uid_series = sr['SeriesInstanceUID']
-                    if series_desc in series_idx:
-                        series_idx[series_desc] += 1
+                    if series_desc not in series:
+                        series[series_desc] = [uid_series]
                     else:
-                        series_idx[series_desc] = 0
-                    series_desc = (series_desc, series_idx[series_desc])
-                    if sery == series_desc:
-                        return uid_series
-                    series[series_desc] = uid_series
+                        series[series_desc].append(uid_series)
 
                 if isinstance(sery, str):
-                    series_list = [s for s in series.keys() if s[0]==sery]
-                    if len(series_list) == 1:
-                        return series[(sery, 0)]
-                    elif len(series_list) > 1:
-                        raise AmbiguousError(
-                            f"Multiple series with name {sery}. "
-                            f"Please specify the index along with the description. "
-                            f"For instance ({sery}, {len(series)-1})'. "
-                        )
-                raise ValueError(f"Series {sery} not found in study {study}.")
+                    if sery not in series:
+                        raise ValueError(f"Series {sery} not found in study {study}.")
+                    if len(series[sery]) == 1:
+                        return series[sery][0]
+                    raise ValueError(
+                        f"Multiple series with name {sery}. "
+                        f"Please specify the index along with the description. "
+                        f"For instance ({sery}, {len(series)-1})'. "
+                    )
+                else:
+                    if sery[0] not in series:
+                        raise ValueError(f"Series {sery[0]} not found in study {study}.")
+                    try:
+                        return series[sery[0]][sery[1]]
+                    except IndexError:
+                        raise ValueError(
+                            f"Index {sery[1]} is out of bounds for series {sery[0]}. "
+                            f"The are {len(series[sery[0]])} series with description {sery[0]} in study {study}."
+                        )                    
+            
+                # series = {}
+                # series_idx = {}
+                # for sr in sorted(st['series'], key=lambda sr: sr['SeriesNumber']):
+                #     series_desc = sr['SeriesDescription']
+                #     uid_series = sr['SeriesInstanceUID']
+                #     if series_desc in series_idx:
+                #         series_idx[series_desc] += 1
+                #     else:
+                #         series_idx[series_desc] = 0
+                #     series_desc = (series_desc, series_idx[series_desc])
+                #     if sery == series_desc:
+                #         return uid_series
+                #     series[series_desc] = uid_series
+
+                # if isinstance(sery, str):
+                #     series_list = [s for s in series.keys() if s[0]==sery]
+                #     if len(series_list) == 1:
+                #         return series[(sery, 0)]
+                #     elif len(series_list) > 1:
+                #         raise AmbiguousError(
+                #             f"Multiple series with name {sery}. "
+                #             f"Please specify the index along with the description. "
+                #             f"For instance ({sery}, {len(series)-1})'. "
+                #         )
+                # raise ValueError(f"Series {sery} not found in study {study}.")
 
 
 def patients(dbtree, database, name=None, contains=None, isin=None):
@@ -237,7 +304,7 @@ def studies(dbtree, pat, desc=None, contains=None, isin=None):
     for pt in sorted(dbtree, key=lambda pt: pt['PatientID']):
         if pt['PatientID'] == patient_id:
             study_idx = {}
-            for st in sorted(pt['studies'], key=lambda st: st['StudyInstanceUID']):
+            for st in sorted(pt['studies'], key=_sort_study):
                 study_desc = st['StudyDescription']
                 if study_desc in study_idx:
                     study_idx[study_desc] += 1
@@ -267,7 +334,7 @@ def series(dbtree, stdy, desc=None, contains=None, isin=None):
     for pt in sorted(dbtree, key=lambda pt: pt['PatientID']):
         if pt['PatientID'] == patient_id:
             study_idx = {}
-            for st in sorted(pt['studies'], key=lambda st: st['StudyInstanceUID']):
+            for st in sorted(pt['studies'], key=_sort_study):
                 study_desc = st['StudyDescription']
                 if study_desc in study_idx:
                     study_idx[study_desc] += 1
@@ -354,7 +421,7 @@ def summary(dbtree):
         summary[pat_id, pat_name] = {}
 
         study_idx = {}
-        for study in sorted(patient['studies'], key=lambda st: st['StudyInstanceUID']):
+        for study in sorted(patient['studies'], key=_sort_study):
             study_desc = study['StudyDescription']
             if study_desc in study_idx:
                 study_idx[study_desc] += 1
@@ -386,7 +453,7 @@ def to_csv(dbtree, csv_file):
             pat_id, pat_name = patient['PatientID'], patient['PatientName']
 
             study_idx = {}
-            for study in sorted(patient['studies'], key=lambda st: st['StudyInstanceUID']):
+            for study in sorted(patient['studies'], key=_sort_study):
                 study_desc = study['StudyDescription']
                 if study_desc in study_idx:
                     study_idx[study_desc] += 1
