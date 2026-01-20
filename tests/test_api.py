@@ -100,6 +100,8 @@ def test_dti_volume():
     assert np.array_equal(b700_vol_rec.coords[0][2], [1,0,0])
     assert np.array_equal(b700_vol_rec.values[...,2], b700_3[...,0,0])
 
+    # We can also read just the b-values and b-vectors from the data
+    bvals, bvecs, zloc = db.values(dti_series, 'DiffusionBValue', 'DiffusionGradientOrientation', 'SliceLocation')
 
     shutil.rmtree(tmp)
 
