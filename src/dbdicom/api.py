@@ -235,6 +235,21 @@ def split_series(series:list, attr:Union[str, tuple], key=None)->list:
     return split_series
 
 
+def exists(entity:list):
+    """Check if the entity exists in the database
+
+    Args:
+        entity (list): List of 1, 2, 3 or 4 elements.
+
+    Returns:
+        bool: True if the entity exists (i.e. has data), false otherwise.
+    """
+    dbd = open(entity[0])
+    result = dbd.exists(entity)
+    dbd.close()
+    return result
+
+
 def volume(series:list, dims:list=None, verbose=1, **kwargs) -> vreg.Volume3D:
     """Read volume from a series.
 
