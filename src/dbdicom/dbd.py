@@ -860,7 +860,7 @@ class DataBaseDicom():
         split_series = []
         for index, v in tqdm(enumerate(values), desc='Writing new series'):
             series_desc = series[-1] if isinstance(series, str) else series[-1][0]
-            series_desc = clean_folder_name(f'{series_desc}_{attr}_{v}')
+            series_desc = clean_folder_name(f'{series_desc}_({index})')
             series_v = series[:3] + [(series_desc, 0)]
             self._files_to_series(files[index], series_v)
             split_series.append((v, series_v))
@@ -1052,9 +1052,9 @@ class DataBaseDicom():
         set_values(ds, list(attr.keys()), list(attr.values()))
         # Save results in a new file
         rel_dir = [
-            f"Patient__{attr['PatientID']}", 
-            f"Study__{attr['StudyID']}__{attr['StudyDescription']}", 
-            f"Series__{attr['SeriesNumber']}__{attr['SeriesDescription']}",
+            clean_folder_name(f"Patient__{attr['PatientID']}", '--'), 
+            clean_folder_name(f"Study__{attr['StudyID']}__{attr['StudyDescription']}", '--'), 
+            clean_folder_name(f"Series__{attr['SeriesNumber']}__{attr['SeriesDescription']}", '--'),
         ]
         dir = os.path.join(self.path, str(Path(*rel_dir)))
         os.makedirs(dir, exist_ok=True)
@@ -1154,15 +1154,13 @@ def remove_empty_folders(path):
     Args:
         path (str): The absolute or relative path to the directory to scan.
     """
-    # Walk the directory tree in a bottom-up manner (topdown=False)
-    for dirpath, dirnames, filenames in os.walk(path, topdown=False):
-        # A directory is considered empty if it has no subdirectories and no files
-        if not dirnames and not filenames:
-            try:
+    for dirpath, _, _ in os.walk(path, topdown=False):
+        try:
+            # If the directory is truly empty on disk
+            if not os.listdir(dirpath):
                 shutil.rmtree(dirpath)
-            except OSError as e:
-                # This might happen due to permissions issues
-                print(f"Error removing {dirpath}: {e}")
+        except OSError as e:
+            print(f"Error removing {dirpath}: {e}")
 
 
 def check_slice_cosines(vols, locs):
