@@ -230,6 +230,22 @@ class DataBaseDicom():
             return register.series(self.register, entity, desc, contains, isin)
 
 
+    def exists(self, entity):
+        """Check if the entity exists in the database
+
+        Args:
+            entity (list): List of 1, 2, 3 or 4 elements.
+
+        Returns:
+            bool: True if the entity exists in the database, false otherwise.
+        """
+        try:
+            register.files(self.register, entity)
+        except:
+            return False
+        else:
+            return True
+
     def volume(self, entity:Union[list, str], dims:list=None, verbose=1, **kwargs) -> vreg.Volume3D:
         """Read volume.
 

@@ -107,6 +107,7 @@ def index(dbtree, entity):
                     if sr['SeriesInstanceUID'] == series_uid:
                         return list(sr['instances'].values())
         raise ValueError(f'Series {series_uid} not found')
+    
                     
 def remove(dbtree, entity):
     if len(entity)==2:
