@@ -206,6 +206,12 @@ def delete(entity:list, not_exists_ok=False):
     dbd.close()
 
 
+def fix_duplicates(series, dims:list=None, verbose=1):
+    dbd = open(series[0])
+    dbd.fix_duplicates(series, dims, verbose)
+    dbd.close()   
+
+
 def move(from_entity:list, to_entity:list):
     """Move a DICOM entity
 
@@ -256,7 +262,7 @@ def volume(series:list, dims:list=None, verbose=1, **kwargs) -> vreg.Volume3D:
     Args:
         series (list, str): DICOM entity to read
         dims (list, optional): Non-spatial dimensions of the volume. Defaults to None.
-        verbose (bool, optional): If set to 1, shows progress bar. Defaults to 1.
+        verbose (int, optional): If set to 1, shows progress bar. Defaults to 1.
         kwargs (dict, optional): keywords to filter the series.
 
     Returns:
@@ -274,8 +280,8 @@ def slices(series:list, dims:list=None, verbose=1) -> vreg.Volume3D:
     Args:
         entity (list, str): DICOM series to read
         dims (list, optional): Non-spatial dimensions of the volume. Defaults to None.
-        verbose (bool, optional): If set to 1, shows progress bar. Defaults to 1.
-
+        verbose (int, optional): If set to 1, shows progress bar. Defaults to 1.
+        
     Returns:
         list of vreg.Volume3D
     """
@@ -290,7 +296,7 @@ def volumes_2d(*args, **kwargs):
     return slices(*args, **kwargs)
 
 
-def values(series:list, *attr, dims:list=None, verbose=1) -> Union[np.ndarray, list]:
+def values(series:list, *attr, dims:list=None, verbose=1, filter={}) -> Union[np.ndarray, list]:
     """Read the values of some attributes from a DICOM series
 
     Args:
@@ -299,12 +305,13 @@ def values(series:list, *attr, dims:list=None, verbose=1) -> Union[np.ndarray, l
         dims (list, optional): Dimensions to sort the values. 
             If dims is not provided, values are sorted by 
             InstanceNumber.
+        filter (dict, optional): keywords to filter the series.
 
     Returns:
         tuple: arrays with values for the attributes.
     """
     dbd = open(series[0])
-    values = dbd.values(series, *attr, dims=dims, verbose=verbose)
+    values = dbd.values(series, *attr, dims=dims, verbose=verbose, filter=filter)
     dbd.close()
     return values
 

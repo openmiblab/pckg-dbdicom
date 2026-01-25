@@ -1,6 +1,74 @@
-import numpy as np
-
 from typing import List, Tuple
+import numpy as np
+import itertools
+from functools import cmp_to_key
+
+
+
+
+def _unique_preserve_order(values):
+    out = []
+    for v in values:
+        if not any(_equal(v, u) for u in out):
+            out.append(v)
+    return out
+
+
+def _compare_points(p1, p2):
+    """Lexicographic comparison for mixed-type points."""
+    for a, b in zip(p1, p2):
+        if isinstance(a, np.ndarray) and isinstance(b, np.ndarray):
+            for x, y in zip(a, b):
+                if x < y:
+                    return -1
+                elif x > y:
+                    return 1
+            if len(a) < len(b):
+                return -1
+            elif len(a) > len(b):
+                return 1
+        elif isinstance(a, (list, tuple)) and isinstance(b, (list, tuple)):
+            res = _compare_points(a, b)
+            if res != 0:
+                return res
+        else:
+            if a < b:
+                return -1
+            elif a > b:
+                return 1
+    return 0
+
+
+def _has_duplicate_points(points):
+    for i in range(len(points)):
+        for j in range(i + 1, len(points)):
+            if all(a == b for a, b in zip(points[i], points[j])):
+                return i, j
+    return None, None
+
+
+
+def _equal(a, b):
+    """Compare any type of object recursively: scalars, lists, tuples, arrays."""
+    
+    # Both are numpy arrays
+    if isinstance(a, np.ndarray) and isinstance(b, np.ndarray):
+        return np.array_equal(a, b)
+    
+    # Both are lists or tuples
+    if isinstance(a, (list, tuple)) and isinstance(b, (list, tuple)):
+        if len(a) != len(b):
+            return False
+        return all(_equal(x, y) for x, y in zip(a, b))
+    
+    # Fallback to normal equality
+    return a == b
+
+
+
+
+
+
 
 def to_array_list(values):
     arrays = []
@@ -14,7 +82,37 @@ def to_array_list(values):
     return arrays
 
 
-def meshvals(values) -> Tuple[List[np.ndarray], np.ndarray]:
+
+def duplicates(values):
+    """
+    List indices of duplicate points.
+
+    Works for ANY type of coordinate values (scalars, lists, tuples, arrays).
+    
+    Args:
+        values (list of lists): coordinate axes of equal length
+
+    Returns:
+        list: indices of points that are duplicates
+    """
+    points = list(zip(*values))
+    duplicates_idx = []
+
+    for i, p in enumerate(points):
+        # Compare with all previous points
+        if any(_equal(p, points[j]) for j in range(i)):
+            duplicates_idx.append(i)
+
+    return duplicates_idx
+
+
+
+
+
+
+
+# Original version
+def _meshvals(values) -> Tuple[List[np.ndarray], np.ndarray]:
     """
     Lexicographically sort flattened N coordinate arrays and reshape back to inferred grid shape,
     preserving original type of each input array.
@@ -22,16 +120,16 @@ def meshvals(values) -> Tuple[List[np.ndarray], np.ndarray]:
     Parameters
     ----------
     *arrays : array-like
-        Flattened coordinate arrays of the same length. Can be numbers, strings, or list objects.
+        Flattened coordinate arrays of the same length. All elements of a coordinate array have 
+        the same type but different coordinate arrays can have differen types. All python data types 
+        can be coordinats, including lists or tuples.
     
     Returns
     -------
     sorted_arrays : list[np.ndarray]
-        Coordinate arrays reshaped to inferred N-D grid shape, dtype/type preserved.
+        N Coordinate arrays reshaped to inferred N-D grid shape, dtype/type preserved.
     indices : np.ndarray
         Permutation indices applied to the flattened arrays.
-    shape : tuple[int, ...]
-        Inferred grid shape (number of unique values per axis).
     """
     # Ensure the list elements are arrays
     arrays = to_array_list(values)
@@ -55,7 +153,7 @@ def meshvals(values) -> Tuple[List[np.ndarray], np.ndarray]:
 
     # Check that all coordinates are unique
     points = [tuple(col) for col in sorted_coords]
-    if not all_elements_unique(points):
+    if not _all_elements_unique(points):
         raise ValueError(
             f"Improper coordinates. Coordinate values are not unique."
         )
@@ -66,7 +164,7 @@ def meshvals(values) -> Tuple[List[np.ndarray], np.ndarray]:
     # Check perfect grid
     if np.prod(shape) != sorted_coords.shape[0]:
         raise ValueError(
-            f"Coordinates do not form a perfect Cartesian grid: inferred shape {shape} "
+            f"Coordinates do not form a rectangular grid: inferred shape {shape} "
             f"does not match number of points {sorted_coords.shape[0]}"
         )
     
@@ -80,7 +178,8 @@ def meshvals(values) -> Tuple[List[np.ndarray], np.ndarray]:
     return sorted_arrays, indices
 
 
-def all_elements_unique(items):
+
+def _all_elements_unique(items):
     """
     The most general uniqueness check, but also the slowest (O(n^2)).
     
@@ -95,48 +194,112 @@ def all_elements_unique(items):
 
 
 
-# def NEWmeshvals(coords):
-#     stack_coords = [np.array(c, dtype=object) for c in coords]
-#     stack_coords = np.stack(stack_coords)
-#     mesh_coords, sorted_indices = _meshvals(stack_coords)
-#     mesh_coords = [mesh_coords[d,...] for d in range(mesh_coords.shape[0])]
-#     return mesh_coords, sorted_indices
 
+import numpy as np
+import itertools
+from typing import Tuple, List, Any
 
-# def _meshvals(coords):
-#     # Input array shape: (d, f) with d = nr of dims and f = nr of frames
-#     # Output array shape: (d, f1,..., fd)
-#     if coords.size == 0:
-#         return np.array([])
-#     # Sort by column
-#     sorted_indices = np.lexsort(coords[::-1])
-#     sorted_array = coords[:, sorted_indices]
-#     # Find shape
-#     shape = _mesh_shape(sorted_array)  
-#     # Reshape
-#     mesh_array = sorted_array.reshape(shape)
-#     return mesh_array, sorted_indices
-
-
-# def _mesh_shape(sorted_array):
+def meshvals(values: List[Any]) -> Tuple[List[np.ndarray], np.ndarray]:
+    """
+    Lexicographically sort flattened N coordinate arrays and reshape back to 
+    inferred grid shape.
     
-#     nd = np.unique(sorted_array[0,:]).size
-#     shape = (sorted_array.shape[0], nd)
-
-#     for dim in range(1,shape[0]):
-#         shape_dim = (shape[0], np.prod(shape[1:]), -1)
-#         sorted_array = sorted_array.reshape(shape_dim)
-#         nd = [np.unique(sorted_array[dim,d,:]).size for d in range(shape_dim[1])]
-#         shape = shape + (max(nd),)
-
-#     if np.prod(shape) != sorted_array.size:
-#         raise ValueError(
-#             'Improper dimensions for the series. This usually means '
-#             'that there are multiple images at the same location, \n or that '
-#             'there are no images at one or more locations. \n\n'
-#             'Make sure to specify proper dimensions when reading a pixel array or volume. \n'
-#             'If the default dimensions of pixel_array (InstanceNumber) generate this error, '
-#             'the DICOM data may be corrupted.'
-#         ) 
+    Handles coupled coordinates (non-Cartesian) by inferring shape hierarchically.
+    Example: z=[0,1], p=['A','B'] -> shape (2, 1)
+    """
+    n_points = len(values[0])
+    arrays = []
+    orig_dtypes = []
     
-#     return shape
+    # 1. Normalize inputs to object arrays safely
+    for v in values:
+        if len(v) != n_points:
+            raise ValueError("All input arrays must have the same length.")
+            
+        if isinstance(v, np.ndarray):
+            orig_dtypes.append(v.dtype)
+            arr_obj = v.astype(object)
+        else:
+            orig_dtypes.append(type(v[0])) 
+            arr_obj = np.empty(n_points, dtype=object)
+            arr_obj[:] = list(v)
+            
+        arrays.append(arr_obj)
+
+    coords = np.stack(arrays, axis=1)
+
+    # 2. Lexicographic sort (Cols: 0 -> N)
+    # We transpose and reverse so lexsort uses col 0 as the primary key
+    try:
+        indices = np.lexsort(coords.T[::-1])
+    except TypeError as e:
+        raise TypeError("Coordinate elements must be comparable") from e
+        
+    sorted_coords = coords[indices]
+
+    # 3. Hierarchical Shape Inference
+    # We trace down the columns. At each level, we check how the current
+    # column subdivides the blocks defined by previous columns.
+    
+    # Start with one block covering the whole array [0, N]
+    block_boundaries = [0, n_points] 
+    shape = []
+    
+    for i in range(sorted_coords.shape[1]):
+        col = sorted_coords[:, i]
+        
+        new_boundaries = [0]
+        splits_per_block = []
+        
+        # Iterate over the blocks defined by the PREVIOUS dimension
+        for j in range(len(block_boundaries) - 1):
+            start, end = block_boundaries[j], block_boundaries[j+1]
+            segment = col[start:end]
+            
+            # Group by value in this segment (effectively finding unique values)
+            # groupby is safe for unhashable types
+            segment_splits = 0
+            seg_idx = start
+            for _, group in itertools.groupby(segment):
+                count = sum(1 for _ in group)
+                seg_idx += count
+                new_boundaries.append(seg_idx)
+                segment_splits += 1
+                
+            splits_per_block.append(segment_splits)
+            
+        # 4. Check Rectangularity
+        # For a valid grid, every block from dim (i-1) must split into 
+        # the SAME number of sub-blocks in dim (i).
+        if len(set(splits_per_block)) != 1:
+            raise ValueError(
+                f"Coordinates do not form a rectangular grid. "
+                f"Dimension {i} has inconsistent sizes across the grid."
+            )
+            
+        dim_size = splits_per_block[0]
+        shape.append(dim_size)
+        
+        # Update boundaries for the next dimension
+        block_boundaries = new_boundaries
+
+    shape = tuple(shape)
+    
+    # Final sanity check: Product of shape must equal number of points
+    if np.prod(shape) != n_points:
+         raise ValueError(f"Inferred shape {shape} does not match N points {n_points}")
+
+    # 5. Reshape and Restore
+    sorted_arrays = []
+    for i, dtype_or_type in enumerate(orig_dtypes):
+        arr = sorted_coords[:, i]
+        reshaped_arr = arr.reshape(shape)
+        
+        if isinstance(dtype_or_type, np.dtype):
+            reshaped_arr = reshaped_arr.astype(dtype_or_type)
+        
+        sorted_arrays.append(reshaped_arr)
+
+    return sorted_arrays, indices
+
+
