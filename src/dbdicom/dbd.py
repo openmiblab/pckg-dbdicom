@@ -6,6 +6,7 @@ import zipfile
 import re
 from copy import deepcopy
 from pathlib import Path
+import logging
 
 from tqdm import tqdm
 import numpy as np
@@ -13,16 +14,12 @@ import vreg
 from pydicom.dataset import Dataset
 import pydicom
 
-import dbdicom.utils.arrays
 import dbdicom.dataset as dbdataset
 import dbdicom.database as dbdatabase
 import dbdicom.register as register
 import dbdicom.const as const
-from dbdicom.utils.pydicom_dataset import (
-    get_values, 
-    set_values,
-    set_value,
-    )
+from dbdicom.utils.pydicom_dataset import get_values, set_values
+from dbdicom.utils.points import point_coords, to_array, duplicate_points
 
 
 
@@ -99,6 +96,60 @@ class DataBaseDicom():
         # Cleanup empty folders
         remove_empty_folders(entity[0])
         return self
+    
+
+    def remove_duplicate_frames(self, entity, dims:list=None, verbose=1, filter:dict=None, dry_run=False):
+        """Remove duplicate frames from the entity
+
+        Args:
+            entity (list): remove duplicates from this entity
+            dims (list, optional): Dimensions of grid in which to search for duplicates. 
+                If None are provided, the duplicate InstanceNumbers are removed.
+            verbose (int, optional): Provide feedback of the computation. Defaults to 1.
+            filter (dict, optional): keywords to filter the series. Duplicates will only 
+                be removed from those that are not filtered out.
+            dry_run (bool, optional): if True, files to be deleted are printed but not actually deleted.
+                Default is False (delete for real!).
+
+        Returns:
+            list: deleted files
+        """
+        if dims is None:
+            dims = ['InstanceNumber']
+        elif np.isscalar(dims):
+            dims = [dims]
+        else:
+            dims = list(dims)
+            
+        # Read points
+        points = []
+        files = register.files(self.register, entity)
+        for f in tqdm(files, desc='Reading values..', disable=(verbose==0)):
+            ds = pydicom.dcmread(f)
+            if _skip(ds, filter):
+                continue
+            points_f = get_values(ds, dims)
+            points.append(points_f)
+
+        # Files with duplicate points and their relative paths
+        database = Path(self.path)
+        f_dupl = [Path(files[i]) for i in duplicate_points(points)]
+        rel_paths = [list(f.relative_to(database).parts) for f in f_dupl]
+
+        if dry_run:
+            if len(f_dupl) > 0:
+                # Summarise duplicate files to be deleted
+                msg = f"To delete: {len(f_dupl)} files out of {len(files)} in {entity[1:]}"
+                print(msg)
+                logging.info(msg)
+        else:
+            # Delete duplicates from the register and from disk
+            register.drop(self.register, rel_paths)
+            [f.unlink() for f in f_dupl]
+            remove_empty_folders(self.path)
+
+        return [str(f) for f in f_dupl]
+
     
 
     def close(self): 
@@ -252,16 +303,12 @@ class DataBaseDicom():
         Args:
             entity (list, str): DICOM series to read
             dims (list, optional): Non-spatial dimensions of the volume. Defaults to None.
-            verbose (bool, optional): If set to 1, shows progress bar. Defaults to 1.
+            verbose (bool, int): If set to 1, shows progress bar. Defaults to 1.
             kwargs (dict, optional): keywords to filter the series.
 
         Returns:
             vreg.Volume3D:
         """
-        # if isinstance(entity, str): # path to folder
-        #     return [self.volume(s, dims) for s in self.series(entity)]
-        # if len(entity) < 4: # folder, patient or study
-        #     return [self.volume(s, dims) for s in self.series(entity)]
         
         if dims is None:
             dims = []
@@ -269,43 +316,27 @@ class DataBaseDicom():
             dims = [dims]
         else:
             dims = list(dims)
-        dims = ['SliceLocation'] + dims # replace by slice_location(ds)
 
         # Read dicom files
-        values = [[] for _ in dims]
-        volumes = []
-
+        volumes, points = [], []
         files = register.files(self.register, entity)
         for f in tqdm(files, desc='Reading volume..', disable=(verbose==0)):
             ds = pydicom.dcmread(f)
-
-            # Check if the file can be used
             if _skip(ds, kwargs):
                 continue
+            vol_f = dbdataset.volume(ds)
+            values_f = get_values(ds, ['SliceLocation'] + dims)
+            volumes.append(vol_f)
+            points.append(values_f)
 
-            values_f = get_values(ds, dims)
-            for d in range(len(dims)):
-                values[d].append(values_f[d])
-            volumes.append(dbdataset.volume(ds))
-
-        # check slice cosines and reverse if needed
-        volumes = check_slice_cosines(volumes, values[0])
+        # Check that all orientations are the same
+        volumes = check_slice_cosines(volumes, points)
 
         # Format coordinates as mesh
-        # coords = []
-        # for v in values:
-        #     if np.isscalar(v[0]):
-        #         v_arr = np.array(v)
-        #     else:
-        #         v_arr = np.empty(len(v), dtype=object)
-        #         v_arr[:] = v
-        #     coords.append(v_arr)
-        #coords = [np.array(v) for v in values]
-        #coords, inds = dbdicom.utils.arrays.meshvals(coords)
-        coords, inds = dbdicom.utils.arrays.meshvals(values)
+        coords, inds = point_coords(points)
 
         # Check that all slices have the same coordinates
-        if len(dims) > 1:
+        if len(dims) > 0:
             # Loop over all coordinates after slice location
             for c in coords[1:]:
                 # Loop over all slice locations
@@ -327,22 +358,13 @@ class DataBaseDicom():
 
         # Join 2D volumes into 3D volumes
         vol = vreg.join(vols)
-        # try:
-        #     vol = vreg.join(vols)
-        # except ValueError:
-        #     # some vendors define the slice vector as -cross product 
-        #     # of row and column vector. Check if that solves the issue.
-        #     for v in vols.reshape(-1):
-        #         v.affine[:3,2] = -v.affine[:3,2]
-        #         # Then try again
-        #     vol = vreg.join(vols)
 
         # For multi-dimensional volumes, set dimensions and coordinates
         if vol.ndim > 3:
             # Coordinates of slice 0
             c0 = [c[0,...] for c in coords[1:]]
             vol.set_coords(c0)
-            vol.set_dims(dims[1:])
+            vol.set_dims(dims)
         return vol
 
 
@@ -373,32 +395,32 @@ class DataBaseDicom():
             dims = [dims]
         else:
             dims = list(dims)
-        dims = ['SliceLocation'] + dims
+        # dims = ['SliceLocation'] + dims
 
         # Read dicom files
-        values = {}
+        points = {}
         volumes = {}
 
         files = register.files(self.register, entity)
         for f in tqdm(files, desc='Reading volume..', disable=(verbose==0)):
             ds = pydicom.dcmread(f)
-            values_f = get_values(ds, dims)
             vol = dbdataset.volume(ds, multislice=True)
-            slice_loc = values_f[0]
+            point_f = get_values(ds, ['SliceLocation'] + dims) 
+            slice_loc = point_f[0]
             if slice_loc in volumes:
                 volumes[slice_loc].append(vol)
-                for d in range(len(dims)):
-                    values[slice_loc][d].append(values_f[d])
+                points[slice_loc].append(point_f)
             else:
                 volumes[slice_loc] = [vol]
-                values[slice_loc] = [[values_f[d]] for d in range(len(dims))]
+                points[slice_loc] = [point_f]
 
         # Build a volume for each slice location
         volumes_2d = []
         for slice_loc in volumes.keys():
             vols_list = volumes[slice_loc]
 
-            if values == {}:
+            # if values == {}:
+            if points == {}:
                 if len(vols_list) > 1:
                     raise ValueError(
                         "Cannot return a 2D volume - multiple slices at the same "
@@ -407,16 +429,11 @@ class DataBaseDicom():
                 volumes_2d.append(vols_list[0])
                 continue
 
-            # Sort by coordinata values
-            vals_list = values[slice_loc]
-
-            # Format coordinates as mesh
-            # coords = [np.array(v) for v in vals_list]
-            # coords, inds = dbdicom.utils.arrays.meshvals(coords)
-            coords, inds = dbdicom.utils.arrays.meshvals(vals_list)
+            # Get coordinate values
+            coords, inds = point_coords(points[slice_loc])
 
             # Check that all slices have the same coordinates
-            if len(dims) > 1:
+            if len(dims) > 0:
                 # Loop over all coordinates after slice location
                 for c in coords[1:]:
                     # Loop over all slice locations
@@ -440,12 +457,12 @@ class DataBaseDicom():
                 # Coordinates of slice 0
                 c0 = [c[0,...] for c in coords[1:]]
                 vol.set_coords(c0)
-                vol.set_dims(dims[1:])
+                vol.set_dims(dims)
 
             volumes_2d.append(vol)
 
         # Sort volumes by affine slice location
-        volumes_2d.sort(key=lambda v: affine_slice_loc(v.affine))
+        volumes_2d.sort(key=lambda v: v.loc(2))
 
         return volumes_2d
 
@@ -464,20 +481,19 @@ class DataBaseDicom():
             numpy.ndarray or tuple: numpy array with pixel values, with 
                 at least 3 dimensions (x,y,z). 
         """
-        vols = self.volumes_2d(series, dims, verbose)
+        vols = self.slices(series, dims, verbose)
         for v in vols[1:]:
             if v.shape != vols[0].shape:
                 raise ValueError(
                     "Cannot return a pixel array because slices have different shapes." \
-                    "Instead try using volumes_2d to return a list of 2D volumes."
+                    "Instead try using slices() to return a list of 2D volumes."
                 )
         slices = [v.values for v in vols]
         pixel_array = np.concatenate(slices, axis=2)
         return pixel_array
         
     
-
-    def values(self, series:list, *attr, dims:list=None, verbose=1) -> Union[dict, tuple]:
+    def values(self, series:list, *attr, dims:list=None, verbose=1, filter:dict=None) -> Union[dict, tuple]:
         """Read the values of some attributes from a DICOM series
 
         Args:
@@ -485,14 +501,11 @@ class DataBaseDicom():
             attr (tuple, optional): DICOM attributes to read.
             dims (list, optional): Non-spatial dimensions of the volume. Defaults to None.
             verbose (bool, optional): If set to 1, shows progress bar. Defaults to 1.
+            filter (dict, optional): keywords to filter the series.
 
         Returns:
             tuple: arrays with values for the attributes.
         """
-        # if isinstance(series, str): # path to folder
-        #     return [self.values(s, attr, dims) for s in self.series(series)]
-        # if len(series) < 4: # folder, patient or study
-        #     return [self.values(s, attr, dims) for s in self.series(series)]
 
         if dims is None:
             dims = ['InstanceNumber']
@@ -502,28 +515,23 @@ class DataBaseDicom():
             dims = list(dims)
             
         # Read dicom files
-        coord_values = [[] for _ in dims]
-        attr_values = [[] for _ in attr]
-
+        coord_points = []
+        attr_points = []
         files = register.files(self.register, series)
         for f in tqdm(files, desc='Reading values..', disable=(verbose==0)):
             ds = pydicom.dcmread(f)
-            coord_values_f = get_values(ds, dims)
-            for d in range(len(dims)):
-                coord_values[d].append(coord_values_f[d])
-            attr_values_f = get_values(ds, attr)
-            for a in range(len(attr)):
-                attr_values[a].append(attr_values_f[a])
+            # Check if the file can be used
+            if _skip(ds, filter):
+                continue
+            coord_points.append(get_values(ds, dims))
+            attr_points.append(get_values(ds, list(attr)))
 
         # Format coordinates as mesh
-        # coords = [np.array(v) for v in coord_values]
-        # coords, inds = dbdicom.utils.arrays.meshvals(coords)
-        coords, inds = dbdicom.utils.arrays.meshvals(coord_values)
+        coords, inds = point_coords(coord_points)
 
         # Sort values accordingly
-        #values = [np.array(v) for v in attr_values]
-        values = dbdicom.utils.arrays.to_array_list(attr_values)
-        values = [v[inds].reshape(coords[0].shape) for v in values]
+        values = list(zip(*[attr_points[i] for i in inds]))
+        values = [to_array(v).reshape(coords[0].shape) for v in values]
 
         # Return values
         if len(values) == 1:
@@ -623,17 +631,13 @@ class DataBaseDicom():
                 )
 
         # Read dicom files to sort them
-        coord_values = [[] for _ in dims]
+        points = []
         for f in tqdm(files, desc='Sorting series..', disable=(verbose==0)):
             ds = pydicom.dcmread(f)
-            coord_values_f = get_values(ds, dims)
-            for d in range(len(dims)):
-                coord_values[d].append(coord_values_f[d])
+            points.append(get_values(ds, dims))
 
         # Format coordinates as mesh
-        # coords = [np.array(v) for v in coord_values]
-        # coords, inds = dbdicom.utils.arrays.meshvals(coords)
-        coords, inds = dbdicom.utils.arrays.meshvals(coord_values)
+        coords, inds = point_coords(points)
 
         # Sort files accordingly
         files = np.array(files)[inds]
@@ -667,6 +671,77 @@ class DataBaseDicom():
 
         return self
 
+    def to_npz(self, destination, dims:list=None, skip=False, overwrite=False):
+        """Save a dicom database in a lightweight .npz (numpy) format
+
+        This will save each series in a single .npz file following the 
+        same folder structure and naming conventions as dicom 
+        exports by dbdicom.
+
+        Args:
+            destination (str): path to new npz database
+            dims (list, optional): additional dimensions for the 
+                volumes to be saved.
+            skip (bool, optional): if skip=True, the function will 
+                silently skip over and any series that 
+                are not volumetric or cannot be arranged in the dimensions
+                specified. If skip=False (default) an error will be 
+                raised if such series are found.
+            overwrite (bool, optional): if True, and existing 
+                .npz files will be overwritten. If False (default) 
+                they will be silently ignored and not overwritten.
+
+        Note:
+            At this point this feature is only available for 
+            volumetric series. If multislice series are found, 
+            or volumes that cannot be arranged in the dimensions 
+            specified, an error will be raised unless skip is set to True.
+
+            Most header information contained in DICOM data will NOT 
+            be saved in the npz database. The only information 
+            that is preserved is geometry (affine), dimensions and 
+            coordinates of the volumes saved.
+        """
+        series = self.series()
+        for sery in tqdm(series, desc='Saving database as npz..'):
+
+            # Get IDs
+            patient = sery[1]
+            study_desc, study_id = sery[2][0], sery[2][1]
+            series_desc, series_nr = sery[3][0], sery[3][1]
+
+            # Define output file
+            filepath = os.path.join(
+                destination, 
+                f"Patient__{patient}", 
+                f"Study__{study_id + 1}__{study_desc}",
+                f"Series__{series_nr + 1}__{series_desc}.npz"
+            )
+
+            # Skip if the file exists and overwriting is not allowed
+            if os.path.exists(filepath):
+                if not overwrite:
+                    continue
+
+            try:
+                # Read from dicom
+                vol = self.volume(sery, dims=dims, verbose=0)
+            except Exception as e:
+                if skip:
+                    # Silently skip non-volumetric series
+                    pass
+                else:
+                    # Raises a new error, but keeps the original stack trace attached
+                    msg = (
+                        f"I cannot write this database: {sery} is not a volumetric series. \n"
+                        f"If you want to write the database you must either remove it or save it as multiple series."
+                    )
+                    raise RuntimeError(msg) from e
+            else:
+                # Only writes if self.volume() succeeded
+                vol.write_npz(filepath)
+
+        return self
 
     def to_nifti(self, series:list, file:str, dims=None, verbose=1):
         """Save a DICOM series in nifti format.
@@ -677,7 +752,6 @@ class DataBaseDicom():
             dims (list, optional): Non-spatial dimensions of the volume. 
                 Defaults to None.
             verbose (bool, optional): If set to 1, shows progress bar. Defaults to 1.
-            
         """
         vol = self.volume(series, dims, verbose)
         vreg.write_nifti(vol, file)
@@ -843,7 +917,8 @@ class DataBaseDicom():
         self.delete(from_entity)
         return self
     
-    def split_series(self, series:list, attr:Union[str, tuple], key=None) -> list:
+
+    def split_series(self, series:list, attr:Union[str, tuple], key=None, verbose=0) -> list:
         """
         Split a series into multiple series
         
@@ -851,6 +926,7 @@ class DataBaseDicom():
             series (list): series to split.
             attr (str or tuple): dicom attribute to split the series by. 
             key (function): split by by key(attr)
+            verbose (bool, optional): If set to 1, shows progress bar. Defaults to 1.
         Returns:
             list: list of two-element tuples, where the first element is
             is the value and the second element is the series corresponding to that value.         
@@ -860,9 +936,9 @@ class DataBaseDicom():
         all_files = register.files(self.register, series)
         files = []
         values = []
-        for f in tqdm(all_files, desc=f'Reading {attr}'):
+        for f in tqdm(all_files, desc=f'Reading {attr}', disable=(verbose==0)):
             ds = pydicom.dcmread(f)
-            v = get_values(ds, attr)
+            v = get_values(ds, [attr])[0]
             if key is not None:
                 v = key(v)
             if v in values:
@@ -874,7 +950,7 @@ class DataBaseDicom():
 
         # Copy the files for each value (sorted) to new series
         split_series = []
-        for index, v in tqdm(enumerate(values), desc='Writing new series'):
+        for index, v in tqdm(enumerate(values), desc='Writing new series', disable=(verbose==0)):
             series_desc = series[-1] if isinstance(series, str) else series[-1][0]
             series_desc = clean_folder_name(f'{series_desc}_({index})')
             series_v = series[:3] + [(series_desc, 0)]
@@ -1179,7 +1255,11 @@ def remove_empty_folders(path):
             print(f"Error removing {dirpath}: {e}")
 
 
-def check_slice_cosines(vols, locs):
+
+def check_slice_cosines(vols, points):
+    
+    values = list(zip(*points))
+    locs = values[0]
 
     # If not all slice locations are defined there is nothing to check
     if None in locs:
@@ -1207,7 +1287,7 @@ def check_slice_cosines(vols, locs):
     #     "with the ImagePositionPatient."
     # )
 
-    # Otherwise flip back and return as is
+    # Otherwise flip back and return as is - use default right-handed slice order
     for v in vols:
         v.affine[:3, 2] *= -1
     return vols
@@ -1288,13 +1368,13 @@ def infer_slice_spacing(vols):
 
 
 
-def affine_slice_loc(affine):
-    slice_cosine = affine[:3, 2] / np.linalg.norm(affine[:3, 2]) 
-    return np.dot(affine[:3, 3], slice_cosine)
+# def affine_slice_loc(affine):
+#     slice_cosine = affine[:3, 2] / np.linalg.norm(affine[:3, 2]) 
+#     return np.dot(affine[:3, 3], slice_cosine)
 
 
 def _skip(ds, kwargs):
-    if kwargs == {}:
+    if kwargs is None:
         return False
     fltrs = get_values(ds, list(kwargs.keys()))
     for i, f in enumerate(kwargs.values()):

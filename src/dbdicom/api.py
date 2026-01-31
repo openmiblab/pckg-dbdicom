@@ -206,6 +206,27 @@ def delete(entity:list, not_exists_ok=False):
     dbd.close()
 
 
+def remove_duplicate_frames(entity:list, dims:list=None, verbose=1, filter:dict=None, dry_run=False):
+    """Remove duplicate frames from the entity
+
+    Args:
+        entity (list): remove duplicates from this entity
+        dims (list, optional): Dimensions of grid in which to search for duplicates. 
+            If None are provided, the duplicate InstanceNumbers are removed.
+        verbose (int, optional): Provide feedback of the computation. Defaults to 1.
+        filter (dict, optional): keywords to filter the series. Duplicates will only 
+            be removed from those that are not filtered out.
+        dry_run (bool, optional): if True, files to be deleted are printed but not actually deleted.
+            Default is False (delete for real!).
+    Returns:
+        list: deleted files
+    """
+    dbd = open(entity[0])
+    files = dbd.remove_duplicate_frames(entity, dims, verbose, filter, dry_run)
+    dbd.close()  
+    return files 
+
+
 def move(from_entity:list, to_entity:list):
     """Move a DICOM entity
 
@@ -217,7 +238,7 @@ def move(from_entity:list, to_entity:list):
     dbd.delete(from_entity)
     dbd.close()
 
-def split_series(series:list, attr:Union[str, tuple], key=None)->list:
+def split_series(series:list, attr:Union[str, tuple], key=None, verbose=1)->list:
     """
     Split a series into multiple series
     
@@ -225,12 +246,13 @@ def split_series(series:list, attr:Union[str, tuple], key=None)->list:
         series (list): series to split.
         attr (str or tuple): dicom attribute to split the series by. 
         key (function): split by by key(attr) 
+        verbose (bool, optional): If set to 1, shows progress bar. Defaults to 1.
     Returns:
         list: list of two-element tuples, where the first element is
         is the value and the second element is the series corresponding to that value.      
     """
     dbd = open(series[0])
-    split_series = dbd.split_series(series, attr, key)
+    split_series = dbd.split_series(series, attr, key, verbose)
     dbd.close()
     return split_series
 
@@ -256,7 +278,7 @@ def volume(series:list, dims:list=None, verbose=1, **kwargs) -> vreg.Volume3D:
     Args:
         series (list, str): DICOM entity to read
         dims (list, optional): Non-spatial dimensions of the volume. Defaults to None.
-        verbose (bool, optional): If set to 1, shows progress bar. Defaults to 1.
+        verbose (int, optional): If set to 1, shows progress bar. Defaults to 1.
         kwargs (dict, optional): keywords to filter the series.
 
     Returns:
@@ -274,8 +296,8 @@ def slices(series:list, dims:list=None, verbose=1) -> vreg.Volume3D:
     Args:
         entity (list, str): DICOM series to read
         dims (list, optional): Non-spatial dimensions of the volume. Defaults to None.
-        verbose (bool, optional): If set to 1, shows progress bar. Defaults to 1.
-
+        verbose (int, optional): If set to 1, shows progress bar. Defaults to 1.
+        
     Returns:
         list of vreg.Volume3D
     """
@@ -290,7 +312,7 @@ def volumes_2d(*args, **kwargs):
     return slices(*args, **kwargs)
 
 
-def values(series:list, *attr, dims:list=None, verbose=1) -> Union[np.ndarray, list]:
+def values(series:list, *attr, dims:list=None, verbose=1, filter:dict=None) -> Union[np.ndarray, list]:
     """Read the values of some attributes from a DICOM series
 
     Args:
@@ -299,12 +321,13 @@ def values(series:list, *attr, dims:list=None, verbose=1) -> Union[np.ndarray, l
         dims (list, optional): Dimensions to sort the values. 
             If dims is not provided, values are sorted by 
             InstanceNumber.
+        filter (dict, optional): keywords to filter the series.
 
     Returns:
         tuple: arrays with values for the attributes.
     """
     dbd = open(series[0])
-    values = dbd.values(series, *attr, dims=dims, verbose=verbose)
+    values = dbd.values(series, *attr, dims=dims, verbose=verbose, filter=filter)
     dbd.close()
     return values
 
@@ -347,6 +370,44 @@ def edit(series:list, new_values:dict, dims:list=None, verbose=1):
     dbd = open(series[0])
     dbd.edit(series, new_values, dims=dims, verbose=verbose)
     dbd.close()
+
+
+def to_npz(database, destination, dims:list=None, skip=False, overwrite=False):
+    """Save a dicom database in a lightweight .npz (numpy) format
+
+    This will save each series in a single .npz file following the 
+    same folder structure and naming conventions as dicom 
+    exports by dbdicom.
+
+    Args:
+        database (str): path to DICOM database
+        destination (str): path to new npz database
+        dims (list, optional): additional dimensions for the 
+            volumes to be saved.
+        skip (bool, optional): if skip=True, the function will 
+            silently skip over and any series that 
+            are not volumetric or cannot be arranged in the dimensions
+            specified. If skip=False (default) an error will be 
+            raised if such series are found.
+        overwrite (bool, optional): if True, and existing 
+            .npz files will be overwritten. If False (default) 
+            they will be silently ignored and not overwritten.
+
+    Note:
+        At this point this feature is only available for 
+        volumetric series. If multislice series are found, 
+        or volumes that cannot be arranged in the dimensions 
+        specified, an error will be raised unless skip is set to True.
+
+        Most header information contained in DICOM data will NOT 
+        be saved in the npz database. The only information 
+        that is preserved is geometry (affine), dimensions and 
+        coordinates of the volumes saved.
+    """
+    dbd = open(database)
+    dbd.to_npz(destination, dims, skip, overwrite)
+    dbd.close() 
+
 
 def to_nifti(series:list, file:str, dims:list=None, verbose=1):
     """Save a DICOM series in nifti format.

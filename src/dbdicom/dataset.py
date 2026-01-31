@@ -236,45 +236,56 @@ def affine(ds, multislice=False):
     
     if multislice:
         # For 2D scans the slice_spacing is the slice thickness
-        slice_spacing = ds.get("SliceThickness")
+        slice_spacing = get_values(ds, ["SliceThickness"])[0]
     else:
         # For 3D scans the slice spacing is the SpacingBetweenSlices
         # Spacing Between Slices is not required so can be absent
         # This is less critical because when reading a 3D volume the 
         # definitive slice_spacing is inferred from the slice positions.
-        slice_spacing = ds.get("SpacingBetweenSlices")
+        slice_spacing = get_values(ds, ["SpacingBetweenSlices"])[0]
         if slice_spacing is None:
-            slice_spacing = ds.get("SliceThickness")
+            slice_spacing = get_values(ds, ["SliceThickness"])[0]
 
-    return image.affine_matrix(
-        get_values(ds, 'ImageOrientationPatient'), 
-        get_values(ds, 'ImagePositionPatient'), 
-        get_values(ds, 'PixelSpacing'), 
-        slice_spacing, 
-    #    slice_location = get_values(ds, 'SliceLocation')
-    )
-
-def slice_location(ds):
-    slice_location = get_values(ds, 'SliceLocation')
-    if slice_location is not None:
-        return slice_location
-    image_orientation = get_values(ds, 'ImageOrientationPatient')
-    image_position = get_values(ds, 'ImagePositionPatient')
+    
+    image_orientation = get_values(ds, ['ImageOrientationPatient'])[0]
+    image_position = get_values(ds, ['ImagePositionPatient'])[0]
+    pixel_spacing = get_values(ds, ['PixelSpacing'])[0]
+    
+    row_spacing = pixel_spacing[0]
+    column_spacing = pixel_spacing[1]
+    
     row_cosine = np.array(image_orientation[:3])
     column_cosine = np.array(image_orientation[3:])
     slice_cosine = np.cross(row_cosine, column_cosine)
-    return np.dot(image_position, slice_cosine)
+
+    affine = np.identity(4, dtype=np.float32)
+    affine[:3, 0] = row_cosine * column_spacing
+    affine[:3, 1] = column_cosine * row_spacing
+    affine[:3, 2] = slice_cosine * slice_spacing
+    affine[:3, 3] = image_position
+
+    return affine
 
 
 def set_affine(ds, affine):
     if affine is None:
         raise ValueError('The affine cannot be set to an empty value')
-    v = image.dismantle_affine_matrix(affine)
-    set_values(ds, 'PixelSpacing', v['PixelSpacing'])
-    set_values(ds, 'SpacingBetweenSlices', v['SpacingBetweenSlices'])
-    set_values(ds, 'ImageOrientationPatient', v['ImageOrientationPatient'])
-    set_values(ds, 'ImagePositionPatient', v['ImagePositionPatient'])
-    set_values(ds, 'SliceLocation', np.dot(v['ImagePositionPatient'], v['slice_cosine']))
+    
+    column_spacing = np.linalg.norm(affine[:3, 0])
+    row_spacing = np.linalg.norm(affine[:3, 1])
+    slice_spacing = np.linalg.norm(affine[:3, 2])
+
+    row_cosine = affine[:3, 0] / column_spacing
+    column_cosine = affine[:3, 1] / row_spacing
+    slice_cosine = affine[:3, 2] / slice_spacing
+
+    image_position_patient = affine[:3, 3]
+
+    set_values(ds, 'PixelSpacing', [row_spacing, column_spacing])
+    set_values(ds, 'SpacingBetweenSlices', slice_spacing)
+    set_values(ds, 'ImageOrientationPatient', row_cosine.tolist() + column_cosine.tolist())
+    set_values(ds, 'ImagePositionPatient', image_position_patient.tolist())
+    set_values(ds, 'SliceLocation', np.dot(image_position_patient, slice_cosine))
 
 
 def pixel_data(ds):
@@ -360,17 +371,15 @@ def set_pixel_data(ds, array):
 #     ds.PixelData = array.tobytes()
 
 
-def volume(ds, multislice=False):
-    return vreg.volume(pixel_data(ds), affine(ds, multislice=multislice))
-
-
-
 def is_valid_dicom_tag(value):
     try:
         tag = Tag(value)
         return pydicom.datadict.dictionary_keyword(tag) != ''
     except Exception:
         return False
+
+def volume(ds, multislice=False):
+    return vreg.volume(pixel_data(ds), affine(ds, multislice=multislice))
 
 def set_volume(ds, volume:vreg.Volume3D):
     if volume is None:
@@ -464,8 +473,3 @@ def set_signal_type(ds, value):
     ds.ImageType = value
 
 
-
-if __name__=='__main__':
-
-    pass
-    #codify('C:\\Users\\md1spsx\\Documents\\f32bit.dcm', 'C:\\Users\\md1spsx\\Documents\\f32bit.py')

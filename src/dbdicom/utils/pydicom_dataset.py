@@ -6,13 +6,11 @@ import pydicom
 
 
 
-def get_values(ds, tags):
+def get_values(ds, tags:list):
     """Return a list of values for a dataset"""
 
     # https://pydicom.github.io/pydicom/stable/guides/element_value_types.html
-    if np.isscalar(tags): 
-        return get_values(ds, [tags])[0]
-            
+    
     row = []  
     for tag in tags:
         value = None
@@ -291,6 +289,11 @@ def add_private(ds, tag, value, VR):
     if (tag.group, 0x0010) not in ds:
         ds.private_block(tag.group, 'dbdicom ' + str(tag.group), create=True)
     ds.add_new(tag, VR, format_value(value, VR))
+
+
+
+
+# UTILITIES
     
 
 def str_to_seconds(dicom_tm):

@@ -60,6 +60,7 @@ def add_instance(dbtree:list, attr, rel_path):
     return dbtree
 
 
+
 def files(dbtree, entity):
     # Raises an error if the entity does not exist or has no files
     relpath = index(dbtree, entity)
@@ -132,9 +133,9 @@ def remove(dbtree, entity):
                     
 
 def drop(dbtree, relpaths):
-    for pt in sorted(dbtree[:], key=lambda pt: pt['PatientID']):
-        for st in sorted(pt['studies'][:], key=_sort_study):
-            for sr in sorted(st['series'][:], key=lambda sr: sr['SeriesNumber']):
+    for pt in dbtree[:]:
+        for st in pt['studies'][:]:
+            for sr in st['series'][:]:
                 for nr, relpath in list(sr['instances'].items()):
                     if relpath in relpaths:
                         del sr['instances'][nr]
@@ -142,6 +143,8 @@ def drop(dbtree, relpaths):
                     st['series'].remove(sr)
             if st['series'] == []:
                 pt['studies'].remove(st)
+        if pt['studies'] == []:
+            dbtree.remove(pt)
     return dbtree
 
 

@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+import platform
 
 from tqdm import tqdm
 import numpy as np
@@ -7,7 +8,6 @@ import pandas as pd
 import pydicom
 
 import dbdicom.utils.dcm4che as dcm4che
-import dbdicom.utils.files as filetools
 from dbdicom.utils.pydicom_dataset import get_values
 
 
@@ -28,7 +28,7 @@ COLUMNS = [
 ]
 
 def read(path):
-    files = filetools.all_files(path)
+    files = _all_files(path)
     tags = COLUMNS + ['NumberOfFrames'] # + ['SOPClassUID']
     array = []
     for i, file in tqdm(enumerate(files), total=len(files), desc='Reading DICOM folder'):
@@ -51,6 +51,24 @@ def read(path):
     df = _multiframe_to_singleframe(path, df) # needs updating and testing
     dbtree = _tree(df)
     return dbtree
+
+
+def _all_files(path):
+    files = [item.path for item in _scan_tree(path) if item.is_file()]
+    # Windows has maximum path length of 260 - ignore any files that are longer
+    if platform.system() == 'Windows':
+        files = [f for f in files if len(f) <= 260]
+    return files
+
+
+def _scan_tree(directory):
+    """Helper function: yield DirEntry objects for the directory."""
+
+    for entry in os.scandir(directory):
+        if entry.is_dir(follow_symlinks=False):
+            yield from _scan_tree(entry.path)
+        else:
+            yield entry
 
 
 def _multiframe_to_singleframe(path, df):

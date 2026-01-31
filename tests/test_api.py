@@ -144,7 +144,48 @@ def test_write_volume():
     shutil.rmtree(tmp)
 
 
-def test_volumes_2d():
+def test_remove_duplicate_frames():
+
+    series = [tmp, '007', 'rm-dupl', 'ones']
+    nx, ny, nz = 16, 16, 8
+
+    # Write a volume to the series
+    arr = 1 * np.ones(nx * ny * nz).reshape((nx, ny, nz))
+    vol = vreg.volume(arr)
+    db.write_volume(vol, series, ImageType=['ORIGINAL', 'INPHASE'])
+
+    # Write a second volume to the same series
+    vol = vreg.volume(2 * arr)
+    db.write_volume(vol, series, append=True, ImageType=['ORIGINAL', 'OUTPHASE'])
+
+    # Two volumes at the same slice locations: this fails
+    try:
+        db.volume(series)
+    except:
+        assert True
+    else:
+        assert False
+
+    # Check: If we add ImageType as a dimension the vol is well defined
+    vol = db.volume(series, dims='ImageType')
+    assert vol.shape == (nx, ny, nz, 2)
+    assert vol.values[0, 0, 0, 1] == 2
+
+    # Dry run to test
+    files = db.remove_duplicate_frames(series, dims=['SliceLocation'], dry_run=True)
+    assert len(files) == 8
+
+    # Remove duplicate frames at the same slice location
+    db.remove_duplicate_frames(series, dims=['SliceLocation'])
+
+    # Now the volume can be read
+    vol = db.volume(series)
+    assert vol.shape == (nx, ny, nz)
+    assert np.unique(vol.values) == [1]
+    assert db.unique('ImageType', series) == [['ORIGINAL', 'INPHASE']]
+
+
+def test_slices():
 
     # Write one volume
     values = 100*np.random.rand(128, 192, 5).astype(np.float32)
@@ -165,7 +206,7 @@ def test_volumes_2d():
         assert False
 
     # But we can read them as 2D volumes, returning 10 2D volumes
-    vols = db.volumes_2d(series)
+    vols = db.slices(series)
     assert len(vols) == 10
 
     # Now 4D
@@ -178,7 +219,7 @@ def test_volumes_2d():
     vol2 = vol.translate([0,0,10], coords='volume')
     db.write_volume(vol2, series, append=True)
 
-    vols = db.volumes_2d(series, dims=['ImageType'])
+    vols = db.slices(series, dims=['ImageType'])
     assert len(vols) == 10
     assert vols[-1].shape == (256, 256, 1, 2)
 
@@ -206,10 +247,9 @@ def test_volume():
     assert np.linalg.norm(vol2.affine-vol.affine) == 0
 
     # 4D volume
-    # values = 100*np.random.rand(256, 256, 3, 2).astype(np.float32)
-    values = 100*np.random.rand(2, 2, 2, 2).astype(np.float32)
+    values = np.arange(2 * 2 * 2 * 2).reshape((2,2,2,2))
     image_type = [['ORIGINAL', 'INPHASE'], ['ORIGINAL', 'OUTPHASE']]
-    vol = vreg.volume(values, dims=['ImageType'], coords=(image_type, ), orient='coronal')
+    vol = vreg.volume(values, dims=['ImageType'], coords=(image_type, ))
     series = [tmp, '007', 'dbdicom_test', 'dixon']
     db.write_volume(vol, series)
     vol2 = db.volume(series, dims=['ImageType'])
@@ -221,7 +261,7 @@ def test_volume():
     values = 100*np.random.rand(256, 256, 3, 2, 2).astype(np.float32)
     dims = ['FlipAngle','ImageType']
     coords = ([10, 20], image_type)
-    vol = vreg.volume(values, dims=dims, coords=coords, orient='coronal')
+    vol = vreg.volume(values, dims=dims, coords=coords)
     series = [tmp, '007', 'dbdicom_test', 'vfa_dixon']
     db.write_volume(vol, series)
     vol2 = db.volume(series, dims=dims)
@@ -233,6 +273,18 @@ def test_volume():
     # Test filtering feature
     vol3 = db.volume(series, dims=['FlipAngle'], ImageType=['ORIGINAL', 'INPHASE'])
     assert np.linalg.norm(vol3.values-vol.values[...,0]) < 0.0001*np.linalg.norm(vol.values[...,0])
+
+    # Coronal volume
+    values = np.arange(2 * 2 * 2 * 2).reshape((2,2,2,2))
+    image_type = [['ORIGINAL', 'INPHASE'], ['ORIGINAL', 'OUTPHASE']]
+    vol = vreg.volume(values, dims=['ImageType'], coords=(image_type, ), orient='coronal')
+    series = [tmp, '007', 'dbdicom_test', 'dixon_coronal']
+    db.write_volume(vol, series)
+    vol2 = db.volume(series, dims=['ImageType'])
+    assert np.linalg.norm(vol2.values-vol.values) < 0.0001 * np.linalg.norm(vol.values)
+    assert np.linalg.norm(vol2.affine-vol.affine) == 0
+    assert vol2.dims == vol.dims
+    assert np.array_equal(vol2.coords[0], vol.coords[0])
 
     shutil.rmtree(tmp)
 
@@ -485,16 +537,6 @@ def test_rw_studies():
 
 if __name__ == '__main__':
 
-    test_dti_volume()
-    test_write_volume()
-    test_volumes_2d()
-    test_values()
-    test_edit()
-    test_write_database()
-    test_copy()
-    test_volume()
-    test_db_read()
-    test_rw_series()
-    test_rw_studies()
+    test_remove_duplicate_frames()
 
     print('All api tests have passed!!!')
