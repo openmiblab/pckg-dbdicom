@@ -9,6 +9,7 @@ def dfoot_dti():
     dti = db.series(foot)[0]
     manuf = db.unique('Manufacturer', dti)[0]
 
+    
     print(f'Manufacturer: {manuf}')
 
     bvals = 'DiffusionBValue'
@@ -33,6 +34,10 @@ def dfoot_dti():
 
     print(f"Expected number of images: {len(vals['SliceLocation']) * (len(v1) + len(v2))}")
     print(f"Number of images: {len(vals['InstanceNumber'])}")
+
+    # Input to dipy
+    bvals, bvecs = db.values(dti, bvals, bvecs, dims=['SliceLocation', 'InstanceNumber'])
+
 
 
 def ibeat_dti():
@@ -66,7 +71,14 @@ def ibeat_dti():
     print(f"Expected number of images: {len(vals['SliceLocation']) * (len(v1) + len(v2))}")
     print(f"Number of images: {len(vals['InstanceNumber'])}")
 
+    # Input to dipy
+    bvals, bvecs = db.values(dti, bvals, bvecs, dims=['SliceLocation', 'InstanceNumber'])
+
+    arr = db.pixel_data(dti, dims=['InstanceNumber'])
+    print(arr.shape)
+    
+
 if __name__ == '__main__':
 
-    # ibeat_dti()
-    dfoot_dti()
+    ibeat_dti()
+    # dfoot_dti()

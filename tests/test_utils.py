@@ -7,7 +7,7 @@ import vreg
 
 import dbdicom.dbd
 import dbdicom as db
-from dbdicom.utils.arrays import duplicates
+from dbdicom.utils.points import duplicates
 
 
 # pytest test_duplicates.py

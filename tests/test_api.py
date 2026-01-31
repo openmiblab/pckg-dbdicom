@@ -144,6 +144,47 @@ def test_write_volume():
     shutil.rmtree(tmp)
 
 
+def test_remove_duplicate_frames():
+
+    series = [tmp, '007', 'rm-dupl', 'ones']
+    nx, ny, nz = 16, 16, 8
+
+    # Write a volume to the series
+    arr = 1 * np.ones(nx * ny * nz).reshape((nx, ny, nz))
+    vol = vreg.volume(arr)
+    db.write_volume(vol, series, ImageType=['ORIGINAL', 'INPHASE'])
+
+    # Write a second volume to the same series
+    vol = vreg.volume(2 * arr)
+    db.write_volume(vol, series, append=True, ImageType=['ORIGINAL', 'OUTPHASE'])
+
+    # Two volumes at the same slice locations: this fails
+    try:
+        db.volume(series)
+    except:
+        assert True
+    else:
+        assert False
+
+    # Check: If we add ImageType as a dimension the vol is well defined
+    vol = db.volume(series, dims='ImageType')
+    assert vol.shape == (nx, ny, nz, 2)
+    assert vol.values[0, 0, 0, 1] == 2
+
+    # Dry run to test
+    files = db.remove_duplicate_frames(series, dims=['SliceLocation'], dry_run=True)
+    assert len(files) == 8
+
+    # Remove duplicate frames at the same slice location
+    db.remove_duplicate_frames(series, dims=['SliceLocation'])
+
+    # Now the volume can be read
+    vol = db.volume(series)
+    assert vol.shape == (nx, ny, nz)
+    assert np.unique(vol.values) == [1]
+    assert db.unique('ImageType', series) == [['ORIGINAL', 'INPHASE']]
+
+
 def test_slices():
 
     # Write one volume
@@ -165,7 +206,7 @@ def test_slices():
         assert False
 
     # But we can read them as 2D volumes, returning 10 2D volumes
-    vols = db.volumes_2d(series)
+    vols = db.slices(series)
     assert len(vols) == 10
 
     # Now 4D
@@ -178,7 +219,7 @@ def test_slices():
     vol2 = vol.translate([0,0,10], coords='volume')
     db.write_volume(vol2, series, append=True)
 
-    vols = db.volumes_2d(series, dims=['ImageType'])
+    vols = db.slices(series, dims=['ImageType'])
     assert len(vols) == 10
     assert vols[-1].shape == (256, 256, 1, 2)
 
@@ -496,16 +537,6 @@ def test_rw_studies():
 
 if __name__ == '__main__':
 
-    test_dti_volume()
-    test_write_volume()
-    test_slices()
-    test_values()
-    test_edit()
-    test_write_database()
-    test_copy()
-    test_volume()
-    test_db_read()
-    test_rw_series()
-    test_rw_studies()
+    test_remove_duplicate_frames()
 
     print('All api tests have passed!!!')
