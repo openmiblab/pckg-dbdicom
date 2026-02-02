@@ -21,6 +21,8 @@ import dbdicom.const as const
 from dbdicom.utils.pydicom_dataset import get_values, set_values
 from dbdicom.utils.points import point_coords, to_array, duplicate_points
 
+import dbdicom.npz as npz
+
 
 
 class DataBaseDicom():
@@ -578,7 +580,7 @@ class DataBaseDicom():
 
         # Get the attributes of the destination series
         attr = self._series_attributes(series)
-        n = self._max_instance_number(attr['SeriesInstanceUID'])
+        n = register.max_instance_number(self.register, attr['SeriesInstanceUID'])
 
         if vol.ndim==3:
             slices = vol.split()
@@ -644,7 +646,7 @@ class DataBaseDicom():
 
         # Now edit and write the files
         attr = self._series_attributes(series)
-        n = self._max_instance_number(attr['SeriesInstanceUID'])
+        n = register.max_instance_number(self.register, attr['SeriesInstanceUID'])
 
         # Drop existing attributes if they are edited
         attr = {a:attr[a] for a in attr if a not in new_values}
@@ -705,17 +707,15 @@ class DataBaseDicom():
         series = self.series()
         for sery in tqdm(series, desc='Saving database as npz..'):
 
-            # Get IDs
-            patient = sery[1]
-            study_desc, study_id = sery[2][0], sery[2][1]
-            series_desc, series_nr = sery[3][0], sery[3][1]
-
-            # Define output file
-            filepath = os.path.join(
-                destination, 
-                f"Patient__{patient}", 
-                f"Study__{study_id + 1}__{study_desc}",
-                f"Series__{series_nr + 1}__{series_desc}.npz"
+            # Build filepath
+            patient_id = sery[1]
+            study_desc = sery[2][0]
+            series_desc = sery[3][0]
+            study_id = register.study_id(self.register, sery[:3])
+            series_nr = register.series_number(self.register, sery)
+            filepath = npz.filepath(
+                destination, patient_id, study_desc, series_desc,
+                study_id, series_nr
             )
 
             # Skip if the file exists and overwriting is not allowed
@@ -742,6 +742,7 @@ class DataBaseDicom():
                 vol.write_npz(filepath)
 
         return self
+
 
     def to_nifti(self, series:list, file:str, dims=None, verbose=1):
         """Save a DICOM series in nifti format.
@@ -770,9 +771,16 @@ class DataBaseDicom():
         return self
     
 
-        
+    def dir(self, entity:list) -> str:
+        """Return directory of the entity
 
+        Args:
+            entity (list): DICOM entity as list (database, patient, study or series)
 
+        Returns:
+            list: directory
+        """
+        return register.dir(self.register, entity)
         
 
     def files(self, entity:list) -> list:
@@ -1019,7 +1027,7 @@ class DataBaseDicom():
 
         # Get the attributes of the destination series
         attr = self._series_attributes(to_series)
-        n = self._max_instance_number(attr['SeriesInstanceUID'])
+        n = register.max_instance_number(self.register, attr['SeriesInstanceUID'])
         
         # Copy the files to the new series 
         for i, f in tqdm(enumerate(files), total=len(files), desc=f'Copying series {to_series[1:]}'):
@@ -1027,38 +1035,6 @@ class DataBaseDicom():
             ds = pydicom.dcmread(f)
             self._write_dataset(ds, attr, n + 1 + i)
 
-    def _max_study_id(self, patient_id):
-        for pt in self.register:
-            if pt['PatientID'] == patient_id:
-                # Find the largest integer StudyID
-                n = []
-                for st in pt['studies']:
-                    try:
-                        n.append(int(st['StudyID']))
-                    except:
-                        pass
-                if n == []:
-                    return 0
-                else:
-                    return int(np.amax(n))
-        return 0
-    
-    def _max_series_number(self, study_uid):
-        for pt in self.register:
-            for st in pt['studies']:
-                if st['StudyInstanceUID'] == study_uid:
-                    n = [sr['SeriesNumber'] for sr in st['series']]
-                    return int(np.amax(n))
-        return 0
-
-    def _max_instance_number(self, series_uid):
-        for pt in self.register:
-            for st in pt['studies']:
-                for sr in st['series']:
-                    if sr['SeriesInstanceUID'] == series_uid:
-                        n = list(sr['instances'].keys())
-                        return int(np.amax([int(i) for i in n]))
-        return 0
 
     # def _attributes(self, entity):
     #     if len(entity)==4:
@@ -1103,7 +1079,7 @@ class DataBaseDicom():
             if study[:-1] not in self.patients():
                 study_id = 1
             else:
-                study_id = 1 + self._max_study_id(study[1])
+                study_id = 1 + register.max_study_id(self.register, study[1])
             attr = ['StudyInstanceUID', 'StudyDescription', 'StudyID']
             study_uid = pydicom.uid.generate_uid()
             study_desc = study[-1] if isinstance(study[-1], str) else study[-1][0]
@@ -1129,7 +1105,7 @@ class DataBaseDicom():
             except:
                 series_number = 1
             else:
-                series_number = 1 + self._max_series_number(study_uid)
+                series_number = 1 + register.max_series_number(self.register, study_uid)
             attr = ['SeriesInstanceUID', 'SeriesDescription', 'SeriesNumber']
             series_uid = pydicom.uid.generate_uid()
             series_desc = series[-1] if isinstance(series[-1], str) else series[-1][0]
