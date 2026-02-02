@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 import csv
+import numpy as np
 
 
 class AmbiguousError(Exception):
@@ -59,6 +60,75 @@ def add_instance(dbtree:list, attr, rel_path):
 
     return dbtree
 
+
+def max_study_id(dbtree, patient_id):
+    for pt in dbtree:
+        if pt['PatientID'] == patient_id:
+            # Find the largest integer StudyID
+            n = []
+            for st in pt['studies']:
+                try:
+                    n.append(int(st['StudyID']))
+                except:
+                    pass
+            if n == []:
+                return 0
+            else:
+                return int(np.amax(n))
+    return 0
+
+def max_series_number(dbtree, study_uid):
+    for pt in dbtree:
+        for st in pt['studies']:
+            if st['StudyInstanceUID'] == study_uid:
+                n = [sr['SeriesNumber'] for sr in st['series']]
+                return int(np.amax(n))
+    return 0
+
+def max_instance_number(dbtree, series_uid):
+    for pt in dbtree:
+        for st in pt['studies']:
+            for sr in st['series']:
+                if sr['SeriesInstanceUID'] == series_uid:
+                    n = list(sr['instances'].keys())
+                    return int(np.amax([int(i) for i in n]))
+    return 0
+
+def study_id(dbtree, study): # absolute path to series
+    uid = study_uid(dbtree, study) # TODO need a function study_list() to avoid unnecessary lookups
+    for pt in dbtree:
+        for st in pt['studies']:
+            if st['StudyInstanceUID'] == uid:
+                nr = st['StudyID']
+                return int(nr)
+    return 0
+
+def series_number(dbtree, series): # absolute path to series
+    uid = series_uid(dbtree, series)
+    for pt in dbtree:
+        for st in pt['studies']:
+            for sr in st['series']:
+                if sr['SeriesInstanceUID'] == uid:
+                    nr = sr['SeriesNumber']
+                    return int(nr)
+                
+def dir(dbtree, entity:list) -> list:
+    dir = [entity[0]]
+    if len(entity) == 1:
+        return dir
+    patient_id = entity[1]
+    dir += [f"Patient__{patient_id}"]
+    if len(entity) == 2:
+        return dir
+    study_desc = entity[2][0]
+    studyid = study_id(dbtree, entity[:3])
+    dir += [f"Study__{studyid}__{study_desc}"]
+    if len(entity) == 3:
+        return dir
+    series_desc = entity[3][0]
+    series_nr = series_number(dbtree, entity)
+    dir += [f"Series__{series_nr}__{series_desc}"]
+    return dir
 
 
 def files(dbtree, entity):
@@ -193,32 +263,6 @@ def study_uid(dbtree, study):
                         f"The are {len(studies[study[0]])} series with description {study[0]} in study {study}."
                     )       
 
-            # uid_studies = {}
-            # study_idx = {}
-            # for st in sorted(pt['studies'], key=lambda st: st['StudyInstanceUID']):
-            #     study_desc = st['StudyDescription']
-            #     uid_study = st['StudyInstanceUID']
-            #     if study_desc in study_idx:
-            #         study_idx[study_desc] += 1
-            #     else:
-            #         study_idx[study_desc] = 0
-            #     study_desc = (study_desc, study_idx[study_desc])
-            #     if study == study_desc:
-            #         return uid_study
-            #     uid_studies[study_desc] = uid_study
-
-            # if isinstance(study, str):
-            #     studies_list = [s for s in uid_studies.keys() if s[0]==study]
-            #     if len(studies_list) == 1:
-            #         return uid_studies[(study, 0)]
-            #     elif len(studies_list) > 1:
-            #         raise AmbiguousError(
-            #             f"Multiple studies with name {study}. "
-            #             f"Please specify the index along with the description. "
-            #             f"For instance ({study}, {len(uid_studies)-1})'. "
-            #         )
-            # raise ValueError(f"Study {study} not found in patient {patient_id}.")
-
 
 def series_uid(dbtree, series): # absolute path to series
     uid_study = study_uid(dbtree, series[:-1])
@@ -256,32 +300,6 @@ def series_uid(dbtree, series): # absolute path to series
                             f"Index {sery[1]} is out of bounds for series {sery[0]}. "
                             f"The are {len(series[sery[0]])} series with description {sery[0]} in study {study}."
                         )                    
-            
-                # series = {}
-                # series_idx = {}
-                # for sr in sorted(st['series'], key=lambda sr: sr['SeriesNumber']):
-                #     series_desc = sr['SeriesDescription']
-                #     uid_series = sr['SeriesInstanceUID']
-                #     if series_desc in series_idx:
-                #         series_idx[series_desc] += 1
-                #     else:
-                #         series_idx[series_desc] = 0
-                #     series_desc = (series_desc, series_idx[series_desc])
-                #     if sery == series_desc:
-                #         return uid_series
-                #     series[series_desc] = uid_series
-
-                # if isinstance(sery, str):
-                #     series_list = [s for s in series.keys() if s[0]==sery]
-                #     if len(series_list) == 1:
-                #         return series[(sery, 0)]
-                #     elif len(series_list) > 1:
-                #         raise AmbiguousError(
-                #             f"Multiple series with name {sery}. "
-                #             f"Please specify the index along with the description. "
-                #             f"For instance ({sery}, {len(series)-1})'. "
-                #         )
-                # raise ValueError(f"Series {sery} not found in study {study}.")
 
 
 def patients(dbtree, database, name=None, contains=None, isin=None):
@@ -373,35 +391,6 @@ def series(dbtree, stdy, desc=None, contains=None, isin=None):
     # Return result
     return [[database, patient_id, study, s] for s in series] 
     
-
-
-# def append(dbtree, parent, child_name): 
-#     if len(parent) == 1:
-#         return _new_patient(dbtree, parent, child_name)
-#     elif len(parent) == 2:
-#         return _new_study(dbtree, parent, child_name)
-#     elif len(parent) == 3:
-#         return _new_series(dbtree, parent, child_name)
-
-# def _new_patient(dbtree, database, patient_id):
-#     if patient_id in patients(dbtree, database):
-#         raise ValueError(
-#             f"Cannot create a new patient with id {patient_id}."
-#             f"The ID is already taken."
-#         )
-#     return [database, patient_id]
-    
-# def new_study(dbtree, patient, study): #len(patient)=2
-#     desc = study if isinstance(study, str) else study[0]
-#     studies_in_patient = studies(dbtree, patient, desc=desc)
-#     cnt = len(studies_in_patient)
-#     return patient + [(desc, cnt)]
-    
-# def new_series(dbtree, study, sery): #len(study)=3
-#     desc = sery if isinstance(sery, str) else sery[0]
-#     series_in_study = series(dbtree, study, desc=desc)
-#     cnt = len(series_in_study)
-#     return study + [(desc, cnt)]
 
 
 

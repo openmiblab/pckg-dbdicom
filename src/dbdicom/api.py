@@ -436,6 +436,21 @@ def from_nifti(file:str, series:list, ref:list=None):
     dbd.close()
 
 
+def dir(entity:list) -> str:
+    """Return directory of the entity
+
+    Args:
+        entity (list): DICOM entity as list (database, patient, study or series)
+
+    Returns:
+        list: directory
+    """
+    dbd = open(entity[0])
+    dir = dbd.dir(entity)
+    dbd.close()
+    return dir
+
+
 def files(entity:list) -> list:
     """Read the files in a DICOM entity
 
