@@ -246,8 +246,11 @@ def files(database, PatientID=None, StudyDescription=None, SeriesDescription=Non
         files = [f for f in files if _parse_series_file(f)[1] in SeriesDescription]
 
     return [str(f) for f in files]
- 
 
+
+def file(series):
+    return _file_for_reading(series)
+ 
 def write_volume(vol, series):
     npz_file = _file_for_writing(series)
     vol.write_npz(npz_file)
