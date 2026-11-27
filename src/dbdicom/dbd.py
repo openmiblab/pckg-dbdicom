@@ -7,6 +7,8 @@ import re
 from copy import deepcopy
 from pathlib import Path
 import logging
+import warnings
+
 
 from tqdm import tqdm
 import numpy as np
@@ -863,6 +865,9 @@ class DataBaseDicom():
             entity: the copied entity. If th to_entity is provided, this is 
             returned.
         """
+        if not isinstance(from_entity, list):
+            raise ValueError("Arguments to copy() need to be lists")
+        
         if len(from_entity) == 4:
             if to_entity is None:
                 to_entity = deepcopy(from_entity)
@@ -909,6 +914,21 @@ class DataBaseDicom():
                     f"{to_entity} is not a patient (needs 2 elements)."
                 )                
             self._copy_patient(from_entity, to_entity)
+            return to_entity
+        
+        if len(from_entity) == 1:
+            if to_entity is None:
+                to_entity = deepcopy(from_entity)
+                to_entity[0] += '_copy'
+                while os.path.exists(to_entity[0]):
+                    to_entity[0] += '_copy'
+            if len(to_entity) != 1:
+                raise ValueError(
+                    f"Cannot copy database {from_entity} to {to_entity}. "
+                    f"{to_entity} is not a database (needs 1 elements exactly)."
+                ) 
+            for pt in self.patients():
+                self.copy(pt, [to_entity[0], pt[1]])
             return to_entity
         
         raise ValueError(
@@ -1232,115 +1252,266 @@ def remove_empty_folders(path):
 
 
 
-def check_slice_cosines(vols, points):
-    
-    values = list(zip(*points))
-    locs = values[0]
 
-    # If not all slice locations are defined there is nothing to check
+
+def _check_same_orientation(vols, tol=1e-4):
+    """Raise an error if the slices do not all have the same orientation."""
+    groups = []  # [reference direction matrix, slice indices]
+    for i, v in enumerate(vols):
+        d = v.affine[:3, :3]
+        d = d / np.linalg.norm(d, axis=0)   # unit row, column and slice directions
+        for g in groups:
+            if np.allclose(d, g[0], atol=tol):
+                g[1].append(i)
+                break
+        else:
+            groups.append([d, [i]])
+    if len(groups) > 1:
+        sizes = ", ".join(str(len(g[1])) for g in groups)
+        raise ValueError(
+            f"Cannot read volume: the series contains {len(groups)} different "
+            f"slice orientations ({sizes} slices). Split the series by "
+            "ImageOrientationPatient and try again."
+        )
+
+
+def _slice_direction(vols, locs, tol=0.1):
+    """Compare the order of SliceLocation with the slice axis of the affine.
+
+    Assumes that all slices have the same orientation.
+
+    Returns:
+        int: +1 if SliceLocation increases along the slice axis, -1 if it
+        decreases, and 0 if the two cannot be matched.
+    """
+    col = vols[0].affine[:3, 2]
+    normal = col / np.linalg.norm(col)
+    pos = np.array([np.dot(v.affine[:3, 3], normal) for v in vols])
+    d_pos = pos - pos[0]
+    d_loc = np.asarray(locs, dtype=float) - locs[0]
+
+    if np.allclose(d_loc, d_pos, atol=tol):
+        return 1
+    if np.allclose(d_loc, -d_pos, atol=tol):
+        return -1
+    return 0
+
+
+def check_slice_cosines(vols, points):
+    """Check the slice orientation and the handedness of the slice order."""
+    # Always check, also when SliceLocation is not available
+    _check_same_orientation(vols)
+
+    locs = list(zip(*points))[0]
+
+    # If not all slice locations are defined there is nothing more to check
     if None in locs:
         return vols
 
-    # Count the number of volumes with correct slice locs
-    cnt = _count_correct_slice_locations(vols, locs)
-
-    # If they are all correct, we are done
-    if cnt == len(vols):
-        return vols
-    
-    # If not, flip the slice cosine and count again
-    for v in vols:
-        v.affine[:3, 2] *= -1
-    cnt = _count_correct_slice_locations(vols, locs)
-
-    # If they are all correct, we are done
-    if cnt == len(vols):
-        return vols
-    
-    # # Otherwise raise an error as slice locations must be corrupt    
-    # raise ValueError(
-    #     "Corrupted DICOM files: not all SliceLocation values match up "
-    #     "with the ImagePositionPatient."
-    # )
-
-    # Otherwise flip back and return as is - use default right-handed slice order
-    for v in vols:
-        v.affine[:3, 2] *= -1
+    direction = _slice_direction(vols, locs)
+    if direction == -1:
+        # SliceLocation runs against the slice axis: flip the axis so that
+        # the physical slice order is preserved
+        for v in vols:
+            v.affine[:3, 2] *= -1
+    elif direction == 0:
+        warnings.warn(
+            "SliceLocation does not match ImagePositionPatient. "
+            "Using the default right-handed slice order."
+        )
     return vols
 
-
-def _count_correct_slice_locations(vols, locs):
+# REPLACED 27 / 11 / 2026
+# def _check_slice_cosines(vols, points):
     
-    slice_cosine_0 = vols[0].affine[:3, 2]
-    cnt = 0
-    for i, v in enumerate(vols):
-        slice_cosine = v.affine[:3, 2]
-        if not np.array_equal(slice_cosine_0, slice_cosine):
-            raise ValueError(
-                "Cannot read volume: not all slices have the same orientation. "
-                "Split the series by ImageOrientationPatient and try again."
-            )
-        slice_pos = v.affine[:3, 3]
-        slice_loc = np.dot(slice_pos, slice_cosine)
-        diff = np.around(locs[i] - slice_loc, 2) # precision 10-2 mm
-        if diff == 0:
-            cnt += 1
-    return cnt
+#     values = list(zip(*points))
+#     locs = values[0]
+
+#     # If not all slice locations are defined there is nothing to check
+#     if None in locs:
+#         return vols
+
+#     # Count the number of volumes with correct slice locs
+#     cnt = _count_correct_slice_locations(vols, locs)
+
+#     # If they are all correct, we are done
+#     if cnt == len(vols):
+#         return vols
+    
+#     # If not, flip the slice cosine and count again
+#     for v in vols:
+#         v.affine[:3, 2] *= -1
+#     cnt = _count_correct_slice_locations(vols, locs)
+
+#     # If they are all correct, we are done
+#     if cnt == len(vols):
+#         return vols
+    
+#     # # Otherwise raise an error as slice locations must be corrupt    
+#     # raise ValueError(
+#     #     "Corrupted DICOM files: not all SliceLocation values match up "
+#     #     "with the ImagePositionPatient."
+#     # )
+
+#     # Otherwise flip back and return as is - use default right-handed slice order
+#     for v in vols:
+#         v.affine[:3, 2] *= -1
+#     return vols
 
 
-def infer_slice_spacing(vols):
-    # In case spacing between slices is not (correctly) encoded in 
-    # DICOM it can be inferred from the slice locations.
+# def _count_correct_slice_locations(vols, locs):
+    
+#     slice_cosine_0 = vols[0].affine[:3, 2]
+#     cnt = 0
+#     for i, v in enumerate(vols):
+#         slice_cosine = v.affine[:3, 2]
+#         if not np.array_equal(slice_cosine_0, slice_cosine):
+#             raise ValueError(
+#                 "Cannot read volume: not all slices have the same orientation. "
+#                 "Split the series by ImageOrientationPatient and try again."
+#             )
+#         slice_pos = v.affine[:3, 3]
+#         slice_loc = np.dot(slice_pos, slice_cosine)
+#         diff = np.around(locs[i] - slice_loc, 2) # precision 10-2 mm
+#         if diff == 0:
+#             cnt += 1
+#     return cnt
 
+
+def infer_slice_spacing(vols, tol=0.01):
+    """Set the slice spacing of all slices from their positions.
+
+    The spacing between slices is not always encoded correctly in DICOM, so it
+    is inferred from the positions of the slices projected on the slice
+    direction. The affines of the volumes are modified in place.
+
+    Args:
+        vols (np.ndarray): Array of 2D volumes, with the slices along the
+            first axis and any non-spatial dimensions along the other axes.
+        tol (float, optional): Largest allowed deviation in mm between the
+            spacings of consecutive slices. Defaults to 0.01.
+
+    Raises:
+        ValueError: If slices share a position, are not ordered along the
+            slice direction, or are not equally spaced.
+
+    Returns:
+        np.ndarray: The array of volumes, with the same shape as the input.
+    """
     shape = vols.shape
-    vols = vols.reshape((shape[0], -1))
-    slice_spacing = np.zeros(vols.shape[-1])
+    n_slices = shape[0]
 
-    for d in range(vols.shape[-1]):
+    # For single slice volumes there is nothing to do
+    if n_slices == 1:
+        return vols
 
-        # For single slice volumes there is nothing to do
-        if vols[:,d].shape[0]==1:
-            continue
+    vols = vols.reshape((n_slices, -1))
+    spacings = []
 
-        # Get a normal slice vector from the first volume.
-        mat = vols[0,d].affine[:3,:3]
-        normal = mat[:,2]/np.linalg.norm(mat[:,2])
+    for d in range(vols.shape[1]):
+        col = vols[:, d]
 
-        # Get slice locations by projection on the normal.
-        pos = [v.affine[:3,3] for v in vols[:,d]]
-        slice_loc = [np.dot(p, normal) for p in pos]
+        # Unit normal from the first slice, and slice locations along it,
+        # in the order of the volumes
+        normal = col[0].affine[:3, 2]
+        normal = normal / np.linalg.norm(normal)
+        loc = np.array([np.dot(v.affine[:3, 3], normal) for v in col])
+        distances = np.diff(loc)
 
-        # Sort slice locations and take consecutive differences.
-        slice_loc = np.sort(slice_loc)
-        distances = slice_loc[1:] - slice_loc[:-1]
-
-        # Round to 10 micrometer and check if unique
-        distances = np.around(distances, 2)
-        slice_spacing_d = np.unique(distances)
-
-        # Check if slice spacings are unique - otherwise this is not a volume
-        if len(slice_spacing_d) > 1:
+        if np.any(np.abs(distances) < tol):
             raise ValueError(
-                'Cannot build a volume - spacings between slices are not unique.'
+                "Cannot build a volume - some slices have the same position. "
+                "The series may contain several volumes (for instance with "
+                "different echo times). Split the series or set dims."
             )
-        else:
-            slice_spacing_d= slice_spacing_d[0]
-        
-        # Set correct slice spacing in all volumes
-        for v in vols[:,d]:
-            v.affine[:3,2] = normal * abs(slice_spacing_d)
 
-        slice_spacing[d] = slice_spacing_d
+        # Slices consistently descending along the normal: flip the axis,
+        # so that the first slice stays the origin
+        if np.all(distances < 0):
+            normal, distances = -normal, -distances
+        elif np.any(distances < 0):
+            raise ValueError(
+                "Cannot build a volume - the slices are not ordered along "
+                "the slice direction."
+            )
 
-    # Check slice_spacing is the same across dimensions
-    # Not sure if this is possible as volumes are sorted by slice location
-    slice_spacing = np.unique(slice_spacing)
-    if len(slice_spacing) > 1:
+        if np.ptp(distances) > tol:
+            raise ValueError(
+                "Cannot build a volume - spacings between slices are not "
+                f"uniform (between {distances.min():.3f} and "
+                f"{distances.max():.3f} mm). Slices may be missing."
+            )
+
+        # Mean of the unrounded distances, so that errors do not accumulate
+        spacing = float(np.mean(distances))
+        for v in col:
+            v.affine[:3, 2] = normal * spacing
+        spacings.append(spacing)
+
+    # The slice spacing must be the same across dimensions
+    if np.ptp(spacings) > tol:
         raise ValueError(
-            'Cannot build a volume - spacings between slices are not unique.'
-        )    
+            "Cannot build a volume - the spacing between slices differs "
+            "between dimensions."
+        )
 
     return vols.reshape(shape)
+
+
+# REPLACED 27 / 11 / 2026
+# def infer_slice_spacing(vols):
+#     # In case spacing between slices is not (correctly) encoded in 
+#     # DICOM it can be inferred from the slice locations.
+
+#     shape = vols.shape
+#     vols = vols.reshape((shape[0], -1))
+#     slice_spacing = np.zeros(vols.shape[-1])
+
+#     for d in range(vols.shape[-1]):
+
+#         # For single slice volumes there is nothing to do
+#         if vols[:,d].shape[0]==1:
+#             continue
+
+#         # Get a normal slice vector from the first volume.
+#         mat = vols[0,d].affine[:3,:3]
+#         normal = mat[:,2]/np.linalg.norm(mat[:,2])
+
+#         # Get slice locations by projection on the normal.
+#         pos = [v.affine[:3,3] for v in vols[:,d]]
+#         slice_loc = [np.dot(p, normal) for p in pos]
+
+#         # Sort slice locations and take consecutive differences.
+#         slice_loc = np.sort(slice_loc)
+#         distances = slice_loc[1:] - slice_loc[:-1]
+
+#         # Round to 10 micrometer and check if unique
+#         distances = np.around(distances, 2)
+#         slice_spacing_d = np.unique(distances)
+
+#         # Check if slice spacings are unique - otherwise this is not a volume
+#         if len(slice_spacing_d) > 1:
+#             raise ValueError(
+#                 'Cannot build a volume - spacings between slices are not unique.'
+#             )
+#         else:
+#             slice_spacing_d= slice_spacing_d[0]
+        
+#         # Set correct slice spacing in all volumes
+#         for v in vols[:,d]:
+#             v.affine[:3,2] = normal * abs(slice_spacing_d)
+
+#         slice_spacing[d] = slice_spacing_d
+
+#     # Check slice_spacing is the same across dimensions
+#     # Not sure if this is possible as volumes are sorted by slice location
+#     slice_spacing = np.unique(slice_spacing)
+#     if len(slice_spacing) > 1:
+#         raise ValueError(
+#             'Cannot build a volume - spacings between slices are not unique.'
+#         )    
+
+#     return vols.reshape(shape)
 
 
 
